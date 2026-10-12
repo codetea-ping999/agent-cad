@@ -207,3 +207,29 @@ def test_multiple_roots_are_rejected(tmp_path):
     _, rp = read_step(str(path))
     assert {p.n_roots for p in rp} == {2}
     assert "struct.single_root" in failed(check_step(str(path), [PartSpec("", a), PartSpec("", b)]))
+
+
+def test_rotation_about_the_centroid_is_detected(tmp_path):
+    from build123d import Box
+    a, turned = Box(10, 20, 30), Box(20, 10, 30)   # a turned 90 deg about its centroid: same V, A, centroid
+    path = tmp_path / "rot.step"; write_step([PartSpec("P", turned)], str(path))
+    rep = check_step(str(path), [PartSpec("P", a)])
+    assert failed(rep) == {"P.geom.orientation"}, failed(rep)
+
+
+def test_interleaved_definitions_keep_component_order(tmp_path):
+    from build123d import Box
+    a, b = Box(10, 10, 10), Box(20, 10, 10)
+    parts = [PartSpec("P", a), PartSpec("P", b), PartSpec("P", a)]
+    path = tmp_path / "aba.step"; write_step(parts, str(path), "ASM")
+    _, rp = read_step(str(path))
+    assert [round(p.shape.volume) for p in rp] == [1000, 2000, 1000]
+    rep = check_step(str(path), parts, "ASM")
+    assert rep["pass"], failed(rep)
+
+
+def test_unreadable_file_gives_a_failed_report(tmp_path):
+    from build123d import Box
+    path = tmp_path / "junk.step"; path.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\n", encoding="latin-1")
+    rep = check_step(str(path), [PartSpec("P", Box(1, 1, 1))])
+    assert not rep["pass"] and "struct.import" in failed(rep)
