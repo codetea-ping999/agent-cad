@@ -57,6 +57,16 @@ class _Dims:
         self.sheet.meta.setdefault("features", []).append(dict(name=name, found=int(found), expected=int(expected)))
 
 
+def _covered(edge, faces):
+    """Length of `edge` lying on `faces` (exact, not sampled)."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
+    from OCP.GProp import GProp_GProps
+    from OCP.BRepGProp import BRepGProp
+    c = BRepAlgoAPI_Common(edge.wrapped, faces.wrapped); c.Build()
+    g = GProp_GProps(); BRepGProp.LinearProperties_s(c.Shape(), g)
+    return g.Mass()
+
+
 def _span(c, u):
     """(low, high) extent of cylinder c along the unit vector u, whichever way its axis points."""
     e = np.array(c.axial_extent()) * np.sign(c.axis @ np.asarray(u, float))
@@ -205,14 +215,12 @@ def _body_sheet(p, body, dwg_no, size, k):
     slot_w = slot[-1] - slot[0] if len(slot) >= 2 else float("nan")
     if len(slot) >= 2:                   # the split is symmetric about the stem plane (Y = 0)
         D.rec("slot_center_y", (slot[0] + slot[-1]) / 2, 0.0, "")
-        # the split runs through the whole clamp: across the clamp wall, each side face
-        # covers z0..z1 (sampled every ~1 mm); record the length it leaves uncovered
-        from build123d import Compound, Vector
-        zs = np.linspace(z0 + 0.25, z1 - 0.25, max(9, int(z1 - z0) + 1))
+        # the split runs through the whole clamp: across the clamp wall, the side faces
+        # cover z0..z1 without a gap; record the length they leave uncovered
+        from build123d import Compound, Edge
         for side, ys in (("lo", slot[0]), ("hi", slot[-1])):
             fs_ = Compound([f for y, f in slot_faces if abs(y - ys) < 1e-6])
-            miss = sum(fs_.distance_to(Vector(xm, ys, z)) > 1e-3 for z in zs)
-            D.rec(f"slot_{side}_uncovered", miss / len(zs) * (z1 - z0), 0.0, "")
+            D.rec(f"slot_{side}_uncovered", (z1 - z0) - _covered(Edge.make_line((xm, ys, z0), (xm, ys, z1)), fs_), 0.0, "")
     D.need("pinch_holes", len(pinch), 2); D.need("pinch_cbores", len(cbores), 2)
     D.need("fp_taps", len(taps), 4); D.need("slot", 0 if math.isnan(slot_w) else 1, 1)
     ptaps = find_cyl(body, (0, 1, 0), r=p.tap_drill_d / 2, inner=True)     # pinch threads, -Y ear
@@ -333,6 +341,13 @@ def _body_sheet(p, body, dwg_no, size, k):
             sfx = "" if i == 0 else f"#{i + 1}"
             D.rec("pinch_hole_from_slot" + sfx, h0 - (slot[-1] if len(slot) >= 2 else float("inf")), 0.0, "")
             D.rec("pinch_hole_to_cbore" + sfx, (_span(mate[0], (0, 1, 0))[0] - h1) if mate else float("inf"), 0.0, "")
+        # each thread runs from the slot face (-Y side) out through the -Y ear face
+        from build123d import Vector
+        for i, c in enumerate(ptaps):
+            t0, t1 = _span(c, (0, 1, 0))
+            sfx = "" if i == 0 else f"#{i + 1}"
+            D.rec("pinch_tap_to_slot" + sfx, (slot[0] if len(slot) >= 2 else float("inf")) - t1, 0.0, "")
+            D.rec("pinch_tap_open" + sfx, float(body.is_inside(Vector(c.loc[0], t0 - 0.05, c.loc[2]))), 0.0, "")
         cb_lo, cb_hi = cbores[0].axial_extent() if cbores else (0.0, 0.0)
         # every hole the 2x callouts cover, not just the first
         D.each("pinch_cbore_depth", [np.subtract(*c.axial_extent()[::-1]) for c in cbores] or [0.0], p.cbore_depth, _fmt)
@@ -684,6 +699,10 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
         D.rec("bolt_pitch_y", wy, 2 * p.fp_bolt_w, _fmt(wy)); D.rec("bolt_pitch_n", hn, 2 * p.fp_bolt_off, _fmt(hn))
         cb_depth = t_front - (cb[0].axial_extent()[0] - Bm @ dv) if cb else 0.0
         D.each("cbore_depth", [t_front - (c.axial_extent()[0] - Bm @ dv) for c in cb] or [0.0], 2.5, _fmt)
+        # each counterbore opens out of the front: just past its top, on its axis, is outside
+        from build123d import Vector
+        D.each("cbore_open", [float(fp.is_inside(Vector(*(c.loc + dv * (Bm @ dv + span_d(c)[1] + 0.05 - c.loc @ dv)))))
+                              for c in cb], 0.0, lambda v: "")
         fb_ = front.bbox()
         sh.leader(fs(tl) + np.array([-1, 1]) * scale * holes[0].r * 0.7,
                   [fs(Bm) + (-75, 62), (fb_[0][0] - 10, fb_[1][1] + 10), (fb_[0][0] - 30, fb_[1][1] + 18),
