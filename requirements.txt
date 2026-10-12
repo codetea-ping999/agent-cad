@@ -1,0 +1,7 @@
+build123d>=0.12
+numpy
+matplotlib
+gmsh
+scikit-fem
+meshio
+pytest
