@@ -157,10 +157,10 @@ def test_projection_symbol_is_third_angle():
     lines = [it[1] for it in sh.items if it[0] == "line" and it[2] == "thin"]
     circles = [l for l in lines if len(l) > 20]
     cone = [l for l in lines if len(l) == 5][0]
-    assert max(c[:, 0].max() for c in circles) < cone[:, 0].min()      # end view left of the cone
+    assert min(c[:, 0].min() for c in circles) > cone[:, 0].max()      # end view right of the cone
     left = cone[cone[:, 0] < cone[:, 0].mean()]
     right = cone[cone[:, 0] > cone[:, 0].mean()]
-    assert np.ptp(left[:, 1]) < np.ptp(right[:, 1])                       # small end faces the circles
+    assert np.ptp(right[:, 1]) < np.ptp(left[:, 1])                       # small end faces the circles
 
 
 def test_zero_gap_faceplate_draws():
@@ -603,3 +603,35 @@ def test_open_sections_slot_bridges_and_wide_faceplate_gap():
     dims = {x["name"]: x for x in stem_drawing.body_sheet(q, stem.build(q)[0]).meta["dims"]}
     assert "fp_tap_on_mating_face#4" in dims
     assert all(abs(dims[k]["measured"]) < 1e-3 for k in dims if k.startswith("fp_tap_on_mating_face")), dims
+
+
+def test_window_and_counterbore_openings_are_clear_to_their_walls():
+    """An island in one quadrant of the window, a ring in the outermost 1 % of a
+    counterbore's radius: both reported."""
+    import numpy as np
+    from build123d import Box, Cylinder, Plane, Pos, Align, Vector
+    from agent_cad.drawing.measure import find_cyl
+    p = CASES[0]
+    f = stem.build(p)[1]
+    good = {d["name"]: d for d in stem_drawing.faceplate_sheet(p, f).meta["dims"]}
+    assert good["window_material_mm3"]["measured"] < 1e-3
+    d, n, S, B = stem.frame(p)
+    dv, nv, Bm = np.array([d.X, d.Y, d.Z]), np.array([n.X, n.Y, n.Z]), np.array([B.X, B.Y, B.Z])
+    at = Bm + np.array([0, 1, 0]) * p.fp_window_w * 0.3 + nv * p.fp_window_h * 0.3
+    island = Plane(origin=Vector(*(at - dv * 50)), z_dir=Vector(*dv)) * Cylinder(0.4, 100, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + (island & _hull_box(f)))))}
+    assert "dim.window_material_mm3" in bad
+    c = find_cyl(f, dv, r=p.cbore_d / 2, inner=True)[0]
+    top = c.loc + dv * (max(np.array(c.axial_extent()) * np.sign(c.axis @ dv)) - c.loc @ dv)
+    pl = Plane(origin=Vector(*top), z_dir=Vector(*-dv))
+    ring = pl * (Cylinder(c.r + 0.01, 0.3, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                 - Cylinder(c.r * 0.99, 0.3, align=(Align.CENTER, Align.CENTER, Align.MIN)))
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + ring)))}
+    assert any(x.startswith("dim.cbore_open") for x in bad)
+
+
+def _hull_box(shape):
+    """The shape's bounding box as a solid, to trim test add-ons to the part's extent."""
+    from build123d import Box, Pos
+    bb = shape.bounding_box()
+    return Pos(*bb.center()) * Box(bb.size.X, bb.size.Y, bb.size.Z)

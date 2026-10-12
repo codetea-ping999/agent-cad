@@ -5,6 +5,7 @@ and recorded in sheet.meta["dims"] next to the design intent from the
 parameters, so verify_drawing() can catch model/drawing disagreement.
 """
 import math, datetime, hashlib, json
+import dataclasses
 import numpy as np
 from build123d import Vector
 from ..drawing.sheet import Sheet, View, A2, A3, text_box, text_width
@@ -723,11 +724,12 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
         D.rec("bolt_pitch_y", wy, 2 * p.fp_bolt_w, _fmt(wy)); D.rec("bolt_pitch_n", hn, 2 * p.fp_bolt_off, _fmt(hn))
         cb_depth = t_front - (cb[0].axial_extent()[0] - Bm @ dv) if cb else 0.0
         D.each("cbore_depth", [t_front - (c.axial_extent()[0] - Bm @ dv) for c in cb] or [0.0], 2.5, _fmt)
-        # each counterbore opens out of the front: across its whole section, from inside it
+        # each counterbore opens out of the front: across its whole section (to within the
+        # kernel tolerance of its wall), from inside it
         # out past its top, no material (a skin or ring of any thickness shows)
         def axis_pt(c, t):               # point on c's axis at t along d from Bm
             return c.loc + dv * (Bm @ dv + t - c.loc @ dv)
-        D.each("cbore_open", [_material_in(fp, axis_pt(c, sum(span_d(c)) / 2), axis_pt(c, span_d(c)[1] + 1.0), 0.98 * c.r)
+        D.each("cbore_open", [_material_in(fp, axis_pt(c, sum(span_d(c)) / 2), axis_pt(c, span_d(c)[1] + 1.0), c.r - 1e-3)
                               for c in cb], 0.0, lambda v: "")
         fb_ = front.bbox()
         sh.leader(fs(tl) + np.array([-1, 1]) * scale * holes[0].r * 0.7,
@@ -749,6 +751,13 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
         D.rec("window_r", wr, min(p.fp_window_w, p.fp_window_h) / 2 if want_win else 0.0, _fmt(wr))
         # the drawing shows the window centred on the bar axis: equal +/- extents
         D.rec("window_center_y", wcy, 0.0, ""); D.rec("window_center_n", wcn, 0.0, "")
+        if win:
+            # 貫通: the whole measured opening, not only its centre lines, is clear of material
+            from build123d import Plane, Vector, extrude
+            c = Bm + np.array([0.0, 1.0, 0.0]) * wcy + nv * wcn
+            pl = Plane(origin=Vector(*(c - dv * 100)), x_dir=Vector(0, 1, 0), z_dir=Vector(*dv))
+            prof = stem._window_profile(dataclasses.replace(p, fp_window_w=ww - 2e-3, fp_window_h=wh - 2e-3))
+            D.rec("window_material_mm3", (fp & extrude(pl * prof, 200)).volume, 0.0, "")
     mass = fp.volume / 1000 * stem.density(p)
     _title(sh, p, "ステム フェイスプレート (FACEPLATE)", f"{dwg_no or doc_no(p)}-02", mass, scale=_scale_text(scale))
     _notes(sh, _common_notes(sh, p, [f"※ φ{_fmt(2 * bore.r)} は本体と組み付けた状態で仕上げる (共加工)。",
