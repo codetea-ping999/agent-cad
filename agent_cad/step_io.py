@@ -73,6 +73,49 @@ def _new_doc():
     return doc
 
 
+def _flatten(shp):
+    """A compound made only of (nested, located) compounds and solids -> its solids,
+    each with its placement baked into the geometry. A nested location the writer
+    cannot express as a rigid placement (a mirror) otherwise turns the part into an
+    unnamed sub-product and its material is lost. Anything else is left untouched,
+    so the exchange check still sees stray faces or edges."""
+    from OCP.TopoDS import TopoDS_Iterator, TopoDS_Compound
+    from OCP.TopAbs import TopAbs_COMPOUND, TopAbs_SOLID
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    if shp.ShapeType() != TopAbs_COMPOUND:
+        return shp
+    solids, nested = [], False
+
+    def walk(s, loc):
+        nonlocal nested
+        it = TopoDS_Iterator(s, False, False)
+        while it.More():
+            c = it.Value()
+            cl = loc.Multiplied(c.Location())
+            if c.ShapeType() == TopAbs_COMPOUND:
+                nested = True
+                if not walk(c, cl):
+                    return False
+            elif c.ShapeType() == TopAbs_SOLID:
+                solids.append((c, cl))
+            else:
+                return False
+            it.Next()
+        return True
+    if not walk(shp, TopLoc_Location()) or not nested or not solids:
+        return shp
+    baked = [c.Located(TopLoc_Location()) if l.IsIdentity() else
+             BRepBuilderAPI_Transform(c.Located(TopLoc_Location()), l.Transformation(), True).Shape()
+             for c, l in solids]
+    if len(baked) == 1:
+        return baked[0]
+    out = TopoDS_Compound(); bb = BRep_Builder(); bb.MakeCompound(out)
+    for c in baked:
+        bb.Add(out, c)
+    return out
+
+
 def write_step(parts, path, assembly_name=None, author="agent-cad", organization="agent-cad"):
     """Write one or more parts as AP242. Several parts -> an assembly product
     with one named sub-product per part. Units: millimetre."""
@@ -91,7 +134,7 @@ def write_step(parts, path, assembly_name=None, author="agent-cad", organization
     for defn, idx in definitions(parts):
         # the definition is the unplaced B-rep; each instance's placement goes on its component
         loc = defn.shape.wrapped.Location()
-        shp = defn.shape.wrapped.Located(TopLoc_Location())
+        shp = _flatten(defn.shape.wrapped.Located(TopLoc_Location()))
         if asm is None and not loc.IsIdentity():   # bare part: no component to carry the placement
             shp = BRepBuilderAPI_Transform(shp, loc.Transformation(), True).Shape()
         if any(shp.IsPartner(b) for _, b in labels):

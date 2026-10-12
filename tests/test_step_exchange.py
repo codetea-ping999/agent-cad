@@ -353,6 +353,19 @@ def test_loose_vertex_beside_the_solid_is_rejected():
     assert _stray(Compound([b, Vertex(0, 0, 0)]).wrapped) == 1
 
 
+def test_mirrored_part_keeps_its_material(tmp_path):
+    from build123d import Box, Pos, mirror, Plane
+    from agent_cad.step_io import write_step, PartSpec
+    from agent_cad.verify.step_check import check_step
+    m = mirror(Pos(5, 5, 5) * Box(10, 10, 10), Plane.XZ)       # nested compound with a mirror location
+    s = PartSpec("MIRRORED", m, (0.5, 0.5, 0.5), "SKD61", 7.8)
+    for parts, asm in (([s], None), ([s, PartSpec("OTHER", Box(3, 3, 3), (0.2, 0.2, 0.2), "A6061-T6", 2.7)], "ASM")):
+        path = tmp_path / f"m{len(parts)}.step"
+        write_step(parts, path, asm)
+        rep = check_step(path, parts, asm)
+        assert rep["pass"], [c for c in rep["checks"] if not c["pass"]]
+
+
 def test_tangent_seam_point_is_on_surface(tmp_path):
     """A sample point on a tangent seam of the -17 deg body is called IN by the solid
     classifier although it lies on the surface; the distance fallback settles it."""

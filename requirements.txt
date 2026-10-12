@@ -6,3 +6,4 @@ scikit-fem
 meshio
 ezdxf
 pytest
+shapely
