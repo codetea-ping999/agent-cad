@@ -319,9 +319,12 @@ def test_nested_assembly_reads_leaf_parts(tmp_path):
     w = STEPCAFControl_Writer(); w.SetNameMode(True); w.Transfer(doc, STEPControl_AsIs)
     path = tmp_path / "nested.step"; w.Write(str(path))
     asm, rp = read_step(str(path))
-    assert asm == "TOP" and [p.name for p in rp] == ["LEAF"]
+    assert asm == "TOP" and [p.name for p in rp] == ["LEAF"] and rp[0].path == ("TOP", "SUB")
     c = rp[0].shape.center()
     assert abs(c.X - 100) < 1e-6 and abs(c.Y - 10) < 1e-6 and abs(c.Z) < 1e-6
+    # same leaf, name and placement as a flat export, but an extra level: not what write_step wrote
+    from build123d import Pos
+    assert "struct.flat" in failed(check_step(str(path), [PartSpec("LEAF", Pos(100, 10, 0) * Box(10, 20, 30))], "TOP"))
 
 
 def test_reversed_instance_is_its_own_definition():
@@ -330,3 +333,13 @@ def test_reversed_instance_is_its_own_definition():
     b = Box(10, 10, 10)
     parts = [PartSpec("P", b), PartSpec("P", Shape.cast(b.wrapped.Reversed()))]
     assert len(definitions(parts)) == 2
+
+
+def test_reversed_solid_mesh_volume(tmp_path):
+    from build123d import Box, Shape
+    from agent_cad.verify.step_check import _mesh_volume
+    r = Shape.cast(Box(10, 20, 30).wrapped.Reversed())
+    assert abs(abs(_mesh_volume(r)) - 6000.0) < 1.0
+    path = tmp_path / "rev.step"; write_step([PartSpec("R", r)], str(path))
+    assert "R.mesh.volume" not in failed(check_step(str(path), [PartSpec("R", r)]))
+

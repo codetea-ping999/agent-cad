@@ -144,6 +144,7 @@ class ReadPart:
     material: str | None = None
     density_g_cm3: float | None = None
     n_roots: int = 1  # top-level products in the file (a valid export has exactly one)
+    path: tuple = ()  # assembly names from the root down to this part's parent
 
 
 def read_step(path):
@@ -174,6 +175,13 @@ def read_step(path):
                 return (round(c.Red(), 3), round(c.Green(), 3), round(c.Blue(), 3))
         return None
 
+    def occurrence_color(shp):
+        c = Quantity_Color()
+        for t in (XCAFDoc_ColorType.XCAFDoc_ColorSurf, XCAFDoc_ColorType.XCAFDoc_ColorGen):
+            if ct.GetInstanceColor(shp, t, c):
+                return (round(c.Red(), 3), round(c.Green(), 3), round(c.Blue(), 3))
+        return None
+
     def validation(lab):
         # Get_s gates the lookup: FindAttribute on a label without the
         # attribute crashes in OCP.
@@ -199,7 +207,7 @@ def read_step(path):
     free = TDF_LabelSequence(); st.GetFreeShapes(free)
     asm_name, parts = None, []
 
-    def walk(assembly, placed):
+    def walk(assembly, placed, path):
         """Leaf parts of an assembly, through any depth of subassemblies, each placed
         by the product of the component locations above it."""
         comps = TDF_LabelSequence(); st.GetComponents_s(assembly, comps, False)
@@ -208,7 +216,7 @@ def read_step(path):
             ref = TDF_Label(); st.GetReferredShape_s(comp, ref)
             loc = placed.Multiplied(XCAFDoc_ShapeTool.GetLocation_s(comp))
             if st.IsAssembly_s(ref):
-                walk(ref, loc)
+                walk(ref, loc, path + (name(ref),))
                 continue
             base = st.GetShape_s(ref)
             shp = base.Located(loc.Multiplied(base.Location()))
@@ -216,13 +224,15 @@ def read_step(path):
             if "centroid" in val:               # stored in the definition's frame: place it like the instance
                 c = gp_Pnt(*val["centroid"]).Transformed(loc.Transformation())
                 val["centroid"] = (c.X(), c.Y(), c.Z())
-            parts.append(ReadPart(name(ref), Shape.cast(shp), color(ref), val, *material(ref)))
+            # an occurrence may carry its own colour, overriding its definition's
+            parts.append(ReadPart(name(ref), Shape.cast(shp), occurrence_color(shp) or color(ref), val, *material(ref),
+                                  path=path))
 
     for i in range(1, free.Length() + 1):
         top = free.Value(i)
         if st.IsAssembly_s(top):
             asm_name = name(top)
-            walk(top, TopLoc_Location())
+            walk(top, TopLoc_Location(), (asm_name,))
         else:
             parts.append(ReadPart(name(top), Shape.cast(st.GetShape_s(top)), color(top), validation(top), *material(top)))
     for rp in parts:
