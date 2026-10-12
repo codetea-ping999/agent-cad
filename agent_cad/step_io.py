@@ -27,6 +27,7 @@ from OCP.gp import gp_Pnt
 from build123d import Shape
 
 AP242 = 5  # write.step.schema value for AP242DIS
+DEFAULT_ASSEMBLY = "ASSEMBLY"   # name given to a multi-part export when none is passed
 
 
 @dataclass
@@ -43,8 +44,8 @@ def mass_props(shape, eps=1e-9):
     Gauss order) integration scatters by ~1e-5 on B-spline faces, which would
     mask real exchange errors."""
     v, a = GProp_GProps(), GProp_GProps()
-    BRepGProp.VolumeProperties_s(shape, v, eps)
-    BRepGProp.SurfaceProperties_s(shape, a, eps)
+    BRepGProp.VolumeProperties_s(shape, v, Eps=eps)   # the Eps overload = adaptive Gauss integration
+    BRepGProp.SurfaceProperties_s(shape, a, Eps=eps)
     return v.Mass(), a.Mass(), v.CentreOfMass()
 
 
@@ -67,7 +68,7 @@ def write_step(parts, path, assembly_name=None, author="agent-cad", organization
     asm = None
     if len(parts) > 1 or assembly_name:
         asm = st.NewShape()
-        TDataStd_Name.Set_s(asm, TCollection_ExtendedString(assembly_name or "ASSEMBLY"))
+        TDataStd_Name.Set_s(asm, TCollection_ExtendedString(assembly_name or DEFAULT_ASSEMBLY))
     for ps in parts:
         lab = st.AddShape(ps.shape.wrapped, False)
         TDataStd_Name.Set_s(lab, TCollection_ExtendedString(ps.name))
@@ -121,7 +122,8 @@ def read_step(path):
     r.SetNameMode(True); r.SetColorMode(True); r.SetPropsMode(True); r.SetMatMode(True)
     if r.ReadFile(str(path)) != IFSelect_RetDone:
         raise IOError(f"STEP read failed: {path}")
-    r.Transfer(doc)
+    if not r.Transfer(doc):
+        raise IOError(f"STEP transfer failed (model not fully imported): {path}")
     main = doc.Main()
     st = XCAFDoc_DocumentTool.ShapeTool_s(main)
     ct = XCAFDoc_DocumentTool.ColorTool_s(main)
