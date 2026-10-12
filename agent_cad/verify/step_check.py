@@ -25,7 +25,7 @@ from OCP.TopAbs import TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE
 from OCP.GCPnts import GCPnts_AbscissaPoint
 from OCP.BRepAdaptor import BRepAdaptor_Curve
 from build123d import Shape
-from ..step_io import read_step, write_step, PartSpec, mass_props
+from ..step_io import read_step, write_step, PartSpec, mass_props, DEFAULT_ASSEMBLY
 
 # Thresholds. CATIA V5 works at 0.001 mm resolution; geometry tolerances well
 # below its "sharpness"/merging tolerance avoid healing on import.
@@ -53,6 +53,7 @@ def text_checks(path):
                       schema=m.group(1) if m else None))
     out.append(_check("header.unit_mm", "SI_UNIT(.MILLI.,.METRE.)" in data.replace(" ", "")))
     data = re.sub(r"'(?:[^']|'')*'", "''", data)  # '#' inside names/descriptions is not a reference
+    data = re.sub(r"/\*.*?\*/", "", data, flags=re.S)  # nor inside comments
     defined = set(re.findall(r"^#(\d+)\s*=", data, re.M))
     used = set(re.findall(r"#(\d+)", re.sub(r"^#\d+\s*=", "", data, flags=re.M)))
     missing = sorted(used - defined, key=int)[:5]
@@ -113,7 +114,10 @@ def _close(a, b, rel=REL_TOL):
 # ---------------------------------------------------------------- main
 def check_step(path, reference, assembly_name=None):
     """reference: list[PartSpec] that were written to `path`; assembly_name:
-    the expected assembly product, None when the file must hold bare parts."""
+    the expected assembly product; None means what write_step does by default
+    (bare part for one part, DEFAULT_ASSEMBLY for several)."""
+    if assembly_name is None and len(reference) > 1:
+        assembly_name = DEFAULT_ASSEMBLY
     results, types = text_checks(path)
     asm, parts = read_step(path)
     by_name = {}

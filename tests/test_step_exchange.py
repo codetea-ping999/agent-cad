@@ -138,3 +138,16 @@ def test_empty_tessellation_does_not_crash():
     from build123d import Compound
     from agent_cad.verify.step_check import _mesh_volume
     assert _mesh_volume(Compound([])) is None
+
+
+def test_comment_with_hash_is_not_a_reference(parts, asm_file, tmp_path):
+    txt = asm_file.read_text(encoding="latin-1").replace("DATA;", "DATA;\n/* inspect #999999 */", 1)
+    p = tmp_path / "comment.step"; p.write_text(txt, encoding="latin-1")
+    assert "text.refs_resolve" not in failed(check_step(str(p), parts, "STEM_ASM"))
+
+
+def test_default_assembly_name_matches(parts, tmp_path):
+    p = tmp_path / "default.step"
+    write_step(parts, str(p))
+    rep = check_step(str(p), parts)
+    assert rep["pass"], failed(rep)
