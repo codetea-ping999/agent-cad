@@ -202,10 +202,14 @@ def _body_sheet(p, body, dwg_no, size, k):
     light = min((c for c in find_cyl(body, dv, inner=True) if off_axis(c) < min(p.body_w, p.body_h) / 2 - c.r),
                 key=lambda c: (-round(np.subtract(*c.axial_extent()[::-1]), 3), off_axis(c)), default=None)
     D.need("light_bore", light is not None, 1)
-    pinch = sorted(find_cyl(body, (0, 1, 0), r=p.bolt_clear_d / 2, inner=True), key=lambda c: c.loc[2])
+    # pinch features: Y holes on the steerer clamp, behind the steerer axis (x < 0); the bar bore,
+    # whatever its size, is ahead of it
+    def pinch_side(cs):
+        return [c for c in cs if c.loc[0] < 0]
+    pinch = sorted(pinch_side(find_cyl(body, (0, 1, 0), r=p.bolt_clear_d / 2, inner=True)), key=lambda c: c.loc[2])
     # faceplate taps: off the stem axis (a lightening bore of the tap drill size lies on it)
     taps = [c for c in find_cyl(body, dv, r=p.tap_drill_d / 2, inner=True) if off_axis(c) > 1.0]
-    cbores = find_cyl(body, (0, 1, 0), r=p.cbore_d / 2, inner=True)
+    cbores = pinch_side(find_cyl(body, (0, 1, 0), r=p.cbore_d / 2, inner=True))
     # slot side faces: Y planes across the clamp wall behind the bore (the probe line x = xm),
     # not, say, the bottom of a blind pinch hole
     xm = -(st_bore.r + st_out.r) / 2
@@ -223,7 +227,7 @@ def _body_sheet(p, body, dwg_no, size, k):
             D.rec(f"slot_{side}_uncovered", (z1 - z0) - _covered(Edge.make_line((xm, ys, z0), (xm, ys, z1)), fs_), 0.0, "")
     D.need("pinch_holes", len(pinch), 2); D.need("pinch_cbores", len(cbores), 2)
     D.need("fp_taps", len(taps), 4); D.need("slot", 0 if math.isnan(slot_w) else 1, 1)
-    ptaps = find_cyl(body, (0, 1, 0), r=p.tap_drill_d / 2, inner=True)     # pinch threads, -Y ear
+    ptaps = pinch_side(find_cyl(body, (0, 1, 0), r=p.tap_drill_d / 2, inner=True))     # pinch threads, -Y ear
     D.need("pinch_taps", len(ptaps), 2)
     D.need("fp_tap_pattern", _corners([((c.loc - Bm) @ np.array([0, 1, 0]), (c.loc - Bm) @ nv) for c in taps],
                                       p.fp_bolt_w, p.fp_bolt_off), 4)
@@ -342,12 +346,14 @@ def _body_sheet(p, body, dwg_no, size, k):
             D.rec("pinch_hole_from_slot" + sfx, h0 - (slot[-1] if len(slot) >= 2 else float("inf")), 0.0, "")
             D.rec("pinch_hole_to_cbore" + sfx, (_span(mate[0], (0, 1, 0))[0] - h1) if mate else float("inf"), 0.0, "")
         # each thread runs from the slot face (-Y side) out through the -Y ear face
-        from build123d import Vector
+        from build123d import Edge
         for i, c in enumerate(ptaps):
             t0, t1 = _span(c, (0, 1, 0))
             sfx = "" if i == 0 else f"#{i + 1}"
             D.rec("pinch_tap_to_slot" + sfx, (slot[0] if len(slot) >= 2 else float("inf")) - t1, 0.0, "")
-            D.rec("pinch_tap_open" + sfx, float(body.is_inside(Vector(c.loc[0], t0 - 0.05, c.loc[2]))), 0.0, "")
+            # opens: along its axis, from inside the drill out past its end, no material at all
+            D.rec("pinch_tap_open" + sfx, _covered(Edge.make_line((c.loc[0], (t0 + t1) / 2, c.loc[2]),
+                                                                  (c.loc[0], t0 - 1.0, c.loc[2])), body), 0.0, "")
         cb_lo, cb_hi = cbores[0].axial_extent() if cbores else (0.0, 0.0)
         # every hole the 2x callouts cover, not just the first
         D.each("pinch_cbore_depth", [np.subtract(*c.axial_extent()[::-1]) for c in cbores] or [0.0], p.cbore_depth, _fmt)
@@ -699,9 +705,13 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
         D.rec("bolt_pitch_y", wy, 2 * p.fp_bolt_w, _fmt(wy)); D.rec("bolt_pitch_n", hn, 2 * p.fp_bolt_off, _fmt(hn))
         cb_depth = t_front - (cb[0].axial_extent()[0] - Bm @ dv) if cb else 0.0
         D.each("cbore_depth", [t_front - (c.axial_extent()[0] - Bm @ dv) for c in cb] or [0.0], 2.5, _fmt)
-        # each counterbore opens out of the front: just past its top, on its axis, is outside
-        from build123d import Vector
-        D.each("cbore_open", [float(fp.is_inside(Vector(*(c.loc + dv * (Bm @ dv + span_d(c)[1] + 0.05 - c.loc @ dv)))))
+        # each counterbore opens out of the front: along its axis, from inside the counterbore
+        # out past its top, no material at all (a skin of any thickness shows)
+        from build123d import Edge
+
+        def axis_pt(c, t):               # point on c's axis at t along d from Bm
+            return tuple(c.loc + dv * (Bm @ dv + t - c.loc @ dv))
+        D.each("cbore_open", [_covered(Edge.make_line(axis_pt(c, sum(span_d(c)) / 2), axis_pt(c, span_d(c)[1] + 1.0)), fp)
                               for c in cb], 0.0, lambda v: "")
         fb_ = front.bbox()
         sh.leader(fs(tl) + np.array([-1, 1]) * scale * holes[0].r * 0.7,
