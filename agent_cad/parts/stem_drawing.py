@@ -90,11 +90,13 @@ def doc_no(p):
     return f"AC-STEM-{h}"
 
 
-def _common_notes(p, extra):
+def _common_notes(sh, p, extra):
+    # a material outside MATERIAL_SPEC has no finish: the note says so and check_sheet fails
     _, finish = MATERIAL_SPEC.get(p.material, ("", ""))
+    sh.meta["finish"] = finish
     return [f"指示なき寸法許容差は JIS B 0405-{TOL_CLASS}、幾何公差は JIS B 0419-{GEO_CLASS} による。",
             "指示なきかどは糸面取り C0.2〜0.5、バリなきこと。",
-            f"表面処理: {finish}。寸法は表面処理前に適用する。",
+            f"表面処理: {finish or '未指定 (MATERIAL_SPEC に材料を登録すること)'}。寸法は表面処理前に適用する。",
             "ねじは JIS B 0205 メートル並目、公差域クラス 6H (JIS B 0209)。",
             "クランプ内径部は傷・打痕なきこと。"] + extra
 
@@ -139,7 +141,7 @@ def body_sheet(p: stem.StemParams, body, faceplate=None, dwg_no=None):
     # sheet furniture first so annotations can avoid it
     mass = body.volume / 1000 * rho
     _title(sh, p, "ステム 本体 (STEM BODY)", f"{dwg_no or doc_no(p)}-01", mass)
-    _notes(sh, _common_notes(p, [f"※ φ{_fmt(2 * bar_bore.r)} はフェイスプレートと組み付けた状態で仕上げる (共加工)。",
+    _notes(sh, _common_notes(sh, p, [f"※ φ{_fmt(2 * bar_bore.r)} はフェイスプレートと組み付けた状態で仕上げる (共加工)。",
                                  "ピンチボルト締結トルク 5〜6 N·m、フェイスプレート 4〜5 N·m (参考)。",
                                  "図示なき外形形状は3Dモデル (STEP AP242、同図番) による。"]), (16, 106))
     _general_tol_table(sh, (16, 36))
@@ -440,7 +442,8 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     D.rec("front_thickness", t_front, p.fp_front, _fmt(t_front))
     sh.dim(ss(Bm + dv * t_back + nv * min(ext_n)), ss(Bm + dv * t_back + nv * top_n), 12, _fmt(hn_all), u=(0, 1))
     D.rec("height", hn_all, 2 * (p.fp_bolt_off + p.boss_margin), _fmt(hn_all))
-    sh.dim(ss(Bm + nv * min(ext_n)), ss(Bm + nv * min(ext_n) + dv * t_back), -8, _fmt(t_back))
+    if t_back > 1e-3:          # zero gap: the mating face lies on the bar axis, nothing to dimension
+        sh.dim(ss(Bm + nv * min(ext_n)), ss(Bm + nv * min(ext_n) + dv * t_back), -8, _fmt(t_back))
     D.rec("gap_half", t_back, p.fp_gap / 2, _fmt(t_back))
     sh.fcf(ss(Bm + dv * t_back + nv * min(ext_n)) + (-26, -16), ["flatness", "0.05"])
     sh.text(ss(Bm + dv * t_back + nv * min(ext_n)) + (-26, -21), "合わせ面", 3, 0, "left", "bottom")
@@ -483,7 +486,7 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
         D.rec("window_h", wh, p.fp_window_h if want_win else 0.0, _fmt(wh))
     mass = fp.volume / 1000 * stem.density(p)
     _title(sh, p, "ステム フェイスプレート (FACEPLATE)", f"{dwg_no or doc_no(p)}-02", mass, scale=f"{scale:g}:1")
-    _notes(sh, _common_notes(p, [f"※ φ{_fmt(2 * bore.r)} は本体と組み付けた状態で仕上げる (共加工)。",
+    _notes(sh, _common_notes(sh, p, [f"※ φ{_fmt(2 * bore.r)} は本体と組み付けた状態で仕上げる (共加工)。",
                                  f"本体との合わせ面のすき間 {_fmt(2 * t_back)} (締結前、参考)。"]), (16, 106))
     _general_tol_table(sh, (16, 36))
     sh.meta["part"] = "STEM_FACEPLATE"

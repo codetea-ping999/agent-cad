@@ -21,6 +21,12 @@ def _font():
                        "). Install one, e.g. `apt-get install fonts-ipafont-gothic` or `fonts-noto-cjk`.")
 
 
+def _font_file():
+    """File name of the selected Japanese font, for the DXF text style."""
+    import os
+    return os.path.basename(font_manager.findfont(font_manager.FontProperties(family=_font()), fallback_to_default=False))
+
+
 def to_pdf(sheet, path, dpi=200):
     W, H = sheet.size
     fig = plt.figure(figsize=(W / 25.4, H / 25.4))
@@ -53,7 +59,7 @@ def to_dxf(sheet, path):
     import ezdxf
     from ezdxf.enums import TextEntityAlignment
     doc = ezdxf.new("R2018", setup=True, units=4)  # mm
-    doc.styles.add("JP", font="ipag.ttf")
+    doc.styles.add("JP", font=_font_file())   # the same Japanese font the PDF uses
     lt = {"solid": "CONTINUOUS", "dashed": "HIDDEN", "dashdot": "CENTER"}
     for name, (lw, ls) in STYLES.items():
         doc.layers.add(name.upper(), linetype=lt[ls], lineweight=int(round(lw * 100)))

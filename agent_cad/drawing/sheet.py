@@ -241,6 +241,8 @@ class Sheet:
         mm to the left of u. tol: (upper, lower) strings stacked after text."""
         p1, p2 = np.asarray(p1, float), np.asarray(p2, float)
         u = (p2 - p1) if u is None else np.asarray(u, float)
+        if not np.linalg.norm(u) > 1e-9 or not abs((p2 - p1) @ (u / np.linalg.norm(u))) > 1e-9:
+            raise ValueError(f"zero-length dimension {text!r}")
         u = u / np.linalg.norm(u)
         n = np.array([-u[1], u[0]])
         base = p1 + n * offset
@@ -314,9 +316,9 @@ class Sheet:
     def angle_dim(self, vertex, a1_deg, a2_deg, radius, text):
         c = np.asarray(vertex, float)
         if abs(a2_deg - a1_deg) < 1e-6:
-            # zero angle: no arc to draw, the value sits at the end of the reference line
-            self.text(c + (radius + 1.5) * np.array([math.cos(math.radians(a1_deg)), math.sin(math.radians(a1_deg))]),
-                      text, 3.5, 0, "left", "center")
+            # zero angle: no arc to draw; the value sits just above the end of the reference line
+            u = np.array([math.cos(math.radians(a1_deg)), math.sin(math.radians(a1_deg))])
+            self.text(c + radius * u + np.array([-u[1], u[0]]) * 1.0, text, 3.5, 0, "left", "bottom")
             return
         ts = np.radians(np.linspace(a1_deg, a2_deg, 30))
         pts = c + radius * np.c_[np.cos(ts), np.sin(ts)]

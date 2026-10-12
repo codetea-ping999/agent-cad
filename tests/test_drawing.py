@@ -161,3 +161,31 @@ def test_projection_symbol_is_third_angle():
     left = cone[cone[:, 0] < cone[:, 0].mean()]
     right = cone[cone[:, 0] > cone[:, 0].mean()]
     assert np.ptp(left[:, 1]) < np.ptp(right[:, 1])                       # small end faces the circles
+
+
+def test_zero_gap_faceplate_draws():
+    p = stem.StemParams(fp_gap=0.0)
+    rep = check_sheet(stem_drawing.faceplate_sheet(p, stem.build(p)[1]))
+    assert rep["pass"], failed(rep)
+
+
+def test_zero_angle_text_clears_reference_line():
+    from agent_cad.drawing.sheet import Sheet, text_box
+    sh = Sheet(); sh.angle_dim((100, 100), 0, 0, 50, "0°")
+    t = [it for it in sh.items if it[0] == "text"][0]
+    b0, _ = text_box((t[1], t[2]), t[3], t[4], t[5], t[6], t[7])
+    assert b0[1] > 100                       # the whole text sits above the horizontal line
+
+
+def test_unknown_material_needs_a_finish():
+    p = stem.StemParams(material="S45C", density_g_cm3=7.85)
+    rep = check_sheet(stem_drawing.body_sheet(p, stem.build(p)[0]))
+    assert "content.finish" in {c["check"] for c in failed(rep)}
+
+
+def test_dxf_uses_the_selected_font(tmp_path):
+    from agent_cad.drawing import render
+    p = CASES[0]
+    sh = stem_drawing.faceplate_sheet(p, stem.build(p)[1])
+    to_dxf(sh, tmp_path / "f.dxf")
+    assert ezdxf.readfile(tmp_path / "f.dxf").styles.get("JP").dxf.font == render._font_file()

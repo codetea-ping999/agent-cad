@@ -42,6 +42,7 @@ def check_sheet(sheet):
     add("content.general_tolerance", "JIS B 0405" in tb.get("普通公差", "") and
         any("JIS B 0405" in n for n in sheet.meta.get("notes", [])))
     add("content.general_roughness", bool(sheet.meta.get("roughness_general")))
+    add("content.finish", bool(sheet.meta.get("finish")), finish=sheet.meta.get("finish"))
     add("content.views", len(sheet.views) >= 2, views=[v.name for v in sheet.views])
     # layout
     texts = [it for it in sheet.items if it[0] == "text"]
