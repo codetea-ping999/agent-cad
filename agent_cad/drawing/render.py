@@ -45,7 +45,7 @@ def to_pdf(sheet, path, dpi=200):
             for loop in it[1]:
                 verts += list(loop) + [loop[0]]
                 codes += [Path.MOVETO] + [Path.LINETO] * (len(loop) - 1) + [Path.CLOSEPOLY]
-            ax.add_patch(PathPatch(Path(verts, codes), fc="none", ec="black", lw=0.13 * PT_PER_MM, hatch="////"))
+            ax.add_patch(PathPatch(Path(verts, codes), fc="none", ec="black", lw=STYLES["hatch"][0] * PT_PER_MM, hatch="////"))
         elif k == "text":
             _, x, y, s, size, rot, ha, va = it
             ax.text(x, y, s, fontsize=size * PT_PER_MM * 1.25, rotation=rot, ha=ha, va=va,
