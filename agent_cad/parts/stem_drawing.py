@@ -177,8 +177,9 @@ def _body_sheet(p, body, dwg_no, size, k):
     L = np.linalg.norm(Bm - Sm); ang = math.degrees(math.atan2(Bm[2] - Sm[2], Bm[0] - Sm[0]))
     y0, y1 = bar_bore.axial_extent()
     # lightening bore: the widest internal cylinder along the stem axis, whatever its size
+    # (of equal radii, the longest face: a sliver left where the bore meets another is not it)
     light = max((c for c in find_cyl(body, dv, inner=True) if c.r > p.tap_drill_d / 2 + 0.1),
-                key=lambda c: c.r, default=None)
+                key=lambda c: (round(c.r, 3), np.subtract(*c.axial_extent()[::-1])), default=None)
     D.need("light_bore", light is not None, 1)
     pinch = sorted(find_cyl(body, (0, 1, 0), r=p.bolt_clear_d / 2, inner=True), key=lambda c: c.loc[2])
     taps = find_cyl(body, dv, r=p.tap_drill_d / 2, inner=True)
@@ -267,6 +268,9 @@ def _body_sheet(p, body, dwg_no, size, k):
         sh.leader(tip, [tip + (14, 22), tip + (-14, 22), tip + (14, -22), tip + (-14, -22)], f"φ{_fmt(2 * light.r)}")
     if light is not None:
         D.rec("light_d", 2 * light.r, p.light_d, f"φ{_fmt(2 * light.r)}")
+        # drawn on the stem centreline Sm-Bm: the axis must lie on it
+        rel = light.loc - Sm
+        D.rec("light_axis_offset", np.linalg.norm(rel - (rel @ dv) * dv), 0.0, "")
     if len(pinch) == 2:
         pz = pinch[1].loc[2] - pinch[0].loc[2]
         bx = pinch[0].loc[0]
@@ -525,6 +529,8 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     if bore is None:
         return _unrecognised(p, size, "STEM_FACEPLATE", "ステム フェイスプレート (FACEPLATE)",
                              f"{dwg_no or doc_no(p)}-02", dict(bar_bore=False))
+    # every view and dimension is laid out about the nominal bar axis Bm
+    D.rec("bar_bore_axis_offset", math.hypot((bore.loc - Bm) @ dv, (bore.loc - Bm) @ nv), 0.0, "")
 
     def off_window(cs):
         # the window's end radii are cylinders too: one of the same radius is not a bolt hole
