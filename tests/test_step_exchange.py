@@ -64,3 +64,42 @@ def test_units_are_honoured(parts, asm_file, tmp_path):
     bad = tmp_path / "cm.step"; bad.write_text(txt, encoding="latin-1")
     f = failed(check_step(str(bad), parts, "STEM_ASM"))
     assert "header.unit_mm" in f and "STEM_BODY.geom.vs_reference" in f
+
+
+def test_material_and_density_round_trip(parts, asm_file, tmp_path):
+    _, rp = read_step(str(asm_file))
+    assert {(p.material, p.density_g_cm3) for p in rp} == {("A6061-T6", 2.7)}
+    txt = asm_file.read_text(encoding="latin-1")
+    txt2, n = re.subn(r"(POSITIVE_RATIO_MEASURE\(\s*)2\.7\b", r"\g<1>2.8", txt)
+    assert n >= 1
+    bad = tmp_path / "dens.step"; bad.write_text(txt2, encoding="latin-1")
+    assert any(c.endswith(".material") for c in failed(check_step(str(bad), parts, "STEM_ASM")))
+
+
+def test_unexpected_assembly_wrapper_is_detected(parts, tmp_path):
+    path = tmp_path / "wrapped.step"
+    write_step(parts[:1], str(path), "WRAPPER")   # a single part wrapped in an assembly
+    assert "struct.assembly_name" in failed(check_step(str(path), parts[:1], None))
+
+
+def test_duplicate_part_names_are_detected(parts, tmp_path):
+    path = tmp_path / "dup.step"
+    dup = [parts[0], PartSpec("STEM_BODY", parts[1].shape, parts[1].color, parts[1].material, 2.7)]
+    write_step(dup, str(path), "STEM_ASM")
+    assert "struct.part_names" in failed(check_step(str(path), parts, "STEM_ASM"))
+
+
+def test_header_without_schema_fails_cleanly(parts, asm_file, tmp_path):
+    txt = re.sub(r"FILE_SCHEMA\s*\(.*?\);", "FILE_SCHEMA(());", asm_file.read_text(encoding="latin-1"), flags=re.S)
+    bad = tmp_path / "noschema.step"; bad.write_text(txt, encoding="latin-1")
+    f = failed(check_step(str(bad), parts, "STEM_ASM"))   # must not raise
+    assert "header.schema_ap242" in f
+
+
+def test_hash_inside_string_is_not_a_reference(tmp_path):
+    from build123d import Box
+    path = tmp_path / "hash.step"
+    part = [PartSpec("BRACKET #99999", Box(10, 10, 10))]
+    write_step(part, str(path))
+    rep = check_step(str(path), part, None)
+    assert rep["pass"], failed(rep)

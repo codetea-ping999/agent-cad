@@ -7,7 +7,9 @@ the geometry it rebuilt matches what was sent.
 from dataclasses import dataclass
 from OCP.TDocStd import TDocStd_Document
 from OCP.TCollection import TCollection_ExtendedString, TCollection_HAsciiString, TCollection_AsciiString
-from OCP.XCAFDoc import XCAFDoc_ColorTool, XCAFDoc_DocumentTool, XCAFDoc_Volume, XCAFDoc_Area, XCAFDoc_Centroid, XCAFDoc_ColorType
+from OCP.XCAFDoc import (XCAFDoc, XCAFDoc_ColorTool, XCAFDoc_DocumentTool, XCAFDoc_Volume, XCAFDoc_Area,
+                         XCAFDoc_Centroid, XCAFDoc_ColorType, XCAFDoc_Material, XCAFDoc_MaterialTool)
+from OCP.TDataStd import TDataStd_TreeNode
 from OCP.XCAFApp import XCAFApp_Application
 from OCP.TDataStd import TDataStd_Name
 from OCP.TDF import TDF_Label
@@ -104,14 +106,17 @@ class ReadPart:
     shape: Shape
     color: tuple | None
     validation: dict  # props stored in the file (may be empty)
+    material: str | None = None
+    density_g_cm3: float | None = None
 
 
 def read_step(path):
-    """Read a STEP file with XCAF: returns (assembly_name|None, [ReadPart], length_unit_mm)."""
+    """Read a STEP file with XCAF: returns (assembly_name|None, [ReadPart]).
+    Lengths are converted to mm whatever unit the file declares."""
     doc = _new_doc()
     XCAFDoc_DocumentTool.SetLengthUnit_s(doc, 0.001)  # convert whatever the file uses to mm
     r = STEPCAFControl_Reader()
-    r.SetNameMode(True); r.SetColorMode(True); r.SetPropsMode(True)
+    r.SetNameMode(True); r.SetColorMode(True); r.SetPropsMode(True); r.SetMatMode(True)
     if r.ReadFile(str(path)) != IFSelect_RetDone:
         raise IOError(f"STEP read failed: {path}")
     r.Transfer(doc)
@@ -144,6 +149,16 @@ def read_step(path):
             out["centroid"] = (p.X(), p.Y(), p.Z())
         return out
 
+    def material(lab):
+        # density > 0 means a material is attached; it also gates FindAttribute (see above)
+        if XCAFDoc_MaterialTool.GetDensityForShape_s(lab) <= 0:
+            return None, None
+        tn, m = TDataStd_TreeNode(), XCAFDoc_Material()
+        if lab.FindAttribute(XCAFDoc.MaterialRefGUID_s(), tn) and tn.HasFather() and \
+                tn.Father().Label().FindAttribute(XCAFDoc_Material.GetID_s(), m):
+            return m.GetName().ToCString(), m.GetDensity()  # density as written (g/cm3)
+        return None, None
+
     free = TDF_LabelSequence(); st.GetFreeShapes(free)
     asm_name, parts = None, []
     for i in range(1, free.Length() + 1):
@@ -154,7 +169,8 @@ def read_step(path):
             for j in range(1, comps.Length() + 1):
                 ref = TDF_Label(); st.GetReferredShape_s(comps.Value(j), ref)
                 shp = st.GetShape_s(comps.Value(j))
-                parts.append(ReadPart(name(ref), Shape.cast(shp), color(ref), validation(ref) or validation(comps.Value(j))))
+                parts.append(ReadPart(name(ref), Shape.cast(shp), color(ref), validation(ref) or validation(comps.Value(j)),
+                                      *material(ref)))
         else:
-            parts.append(ReadPart(name(top), Shape.cast(st.GetShape_s(top)), color(top), validation(top)))
+            parts.append(ReadPart(name(top), Shape.cast(st.GetShape_s(top)), color(top), validation(top), *material(top)))
     return asm_name, parts
