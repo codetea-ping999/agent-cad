@@ -249,3 +249,46 @@ def test_empty_shape_has_no_bounds():
     from agent_cad.verify.step_check import _bbox
     empty = TopoDS_Compound(); BRep_Builder().MakeCompound(empty)   # what a damaged component imports as
     assert _bbox(Compound(empty)) is None
+
+
+def _tetra(pts):
+    from build123d import Face, Wire, Shell, Solid
+    faces = [Face(Wire.make_polygon([pts[i] for i in f], close=True)) for f in ((0, 1, 2), (0, 3, 1), (0, 2, 3), (1, 3, 2))]
+    return Solid(Shell(faces))
+
+
+def test_symmetric_part_turned_is_detected(tmp_path):
+    """A regular tetrahedron: isotropic inertia and a cubic bounding box, so only the
+    surface sampling sees the 90 degree turn."""
+    a = _tetra([(10, 10, 10), (10, -10, -10), (-10, 10, -10), (-10, -10, 10)])
+    turned = _tetra([(-10, 10, 10), (10, 10, -10), (-10, -10, -10), (10, -10, 10)])
+    path = tmp_path / "tet.step"; write_step([PartSpec("T", turned)], str(path))
+    assert "T.geom.orientation" in failed(check_step(str(path), [PartSpec("T", a)]))
+    path2 = tmp_path / "tet_ok.step"; write_step([PartSpec("T", a)], str(path2))
+    rep = check_step(str(path2), [PartSpec("T", a)])
+    assert rep["pass"], failed(rep)
+
+
+def test_placed_instances_share_one_definition(tmp_path):
+    from build123d import Box, Pos, Rot
+    b = Box(10, 20, 30)
+    parts = [PartSpec("BOLT", Pos(0, 0, 0) * b), PartSpec("BOLT", Pos(50, 0, 0) * Rot(0, 0, 30) * b)]
+    path = tmp_path / "placed.step"; write_step(parts, str(path), "ASM")
+    rep = check_step(str(path), parts, "ASM")
+    assert rep["pass"], failed(rep)
+    assert next(c for c in rep["checks"] if c["check"] == "text.solid_count")["found"] == 1
+
+
+def test_placed_bare_part_round_trips(tmp_path):
+    from build123d import Box, Pos, Rot
+    part = PartSpec("P", Pos(5, 6, 7) * Rot(0, 0, 90) * Box(10, 20, 30))
+    path = tmp_path / "bare.step"; write_step([part], str(path))
+    rep = check_step(str(path), [part])
+    assert rep["pass"], failed(rep)
+
+
+def test_header_strings_cannot_fake_sections(parts, tmp_path):
+    path = tmp_path / "hdr.step"
+    write_step(parts, str(path), "STEM_ASM", author="x DATA; FILE_SCHEMA(('OTHER'));", organization="it''s")
+    rep = check_step(str(path), parts, "STEM_ASM")
+    assert rep["pass"], failed(rep)

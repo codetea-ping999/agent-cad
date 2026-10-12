@@ -21,7 +21,9 @@ from collections import Counter
 import numpy as np
 from OCP.BRepCheck import BRepCheck_Analyzer
 from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds, ShapeAnalysis_ShapeTolerance
-from OCP.TopAbs import TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE
+from OCP.TopAbs import TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE, TopAbs_ON
+from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+from OCP.gp import gp_Pnt
 from OCP.GCPnts import GCPnts_AbscissaPoint
 from OCP.BRepAdaptor import BRepAdaptor_Curve
 from OCP.GProp import GProp_GProps
@@ -76,6 +78,40 @@ def _scrub(txt):
     return "".join(out)
 
 
+def _mask(txt):
+    """Same lexing as _scrub, but keeps every offset: comments and string contents
+    become spaces, so positions found in the result index the original text."""
+    out, i, n = list(txt), 0, len(txt)
+    while i < n:
+        if txt[i] == "'":
+            j = i + 1
+            while j < n:
+                if txt[j] == "'":
+                    if j + 1 < n and txt[j + 1] == "'":
+                        j += 2; continue
+                    break
+                j += 1
+            out[i + 1:j] = " " * (min(j, n) - i - 1); i = j + 1
+        elif txt.startswith("/*", i):
+            j = txt.find("*/", i + 2); j = n if j < 0 else j + 2
+            out[i:j] = " " * (j - i); i = j
+        else:
+            i += 1
+    return "".join(out)
+
+
+def _string_at(txt, i):
+    """The Part 21 string whose opening quote is at txt[i]."""
+    j, buf = i + 1, []
+    while j < len(txt):
+        if txt[j] == "'":
+            if txt[j + 1:j + 2] == "'":
+                buf.append("'"); j += 2; continue
+            break
+        buf.append(txt[j]); j += 1
+    return "".join(buf)
+
+
 def _entities(data):
     """{id: (type, body)} of the DATA section; whitespace and line breaks are not significant."""
     ents = {}
@@ -90,11 +126,13 @@ def _entities(data):
 
 def text_checks(path):
     raw = open(path, encoding="latin-1").read()
-    head, _, data = raw.partition("DATA;")
+    masked = _mask(raw)                   # find section markers and keywords outside strings/comments only
+    d = re.search(r"(?<![A-Z_0-9])DATA\s*;", masked)
+    head, data = (raw[:d.start()], raw[d.end():]) if d else (raw, "")
     out = []
-    m = re.search(r"FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'", re.sub(r"/\*.*?\*/", "", head, flags=re.S))
-    out.append(_check("header.schema_ap242", m is not None and SCHEMA_AP242 in m.group(1),
-                      schema=m.group(1) if m else None))
+    m = re.search(r"(?<![A-Z_0-9])FILE_SCHEMA\s*\(\s*\(\s*'", masked[:len(head)])
+    schema = _string_at(raw, m.end() - 1) if m else None
+    out.append(_check("header.schema_ap242", schema is not None and SCHEMA_AP242 in schema, schema=schema))
     ents = _entities(_scrub(data))
     # the geometry's length unit (assigned by GLOBAL_UNIT_ASSIGNED_CONTEXT) must be the millimetre;
     # other length units may legitimately exist, e.g. the cm inside a g/cm3 density unit
@@ -136,6 +174,21 @@ def _bbox(shape):
         return None
     lo, hi = b.CornerMin(), b.CornerMax()
     return np.array([lo.X(), lo.Y(), lo.Z(), hi.X(), hi.Y(), hi.Z()])
+
+
+def _off_surface(a, b, n=100, tol=1e-3):
+    """How many of ~n points sampled on a's faces (mesh nodes lie on the exact
+    surface) are not on b's boundary: catches placements that symmetric parts
+    hide from mass properties and bounds."""
+    v, _ = a.tessellate(0.05, 0.2)
+    if not v:
+        return None
+    pts = v[::max(1, len(v) // n)]
+    off = 0
+    for p in pts:
+        c = BRepClass3d_SolidClassifier(b.wrapped, gp_Pnt(p.X, p.Y, p.Z), tol)
+        off += c.State() != TopAbs_ON
+    return off
 
 
 def _mesh_volume(shape, tol=0.02):
@@ -230,8 +283,9 @@ def check_step(path, reference, assembly_name=None):
         di = float(np.abs(I - I0).max() / max(np.abs(I0).max(), 1e-12))
         bb, bb0 = _bbox(s), _bbox(ref.shape)
         db = float(np.abs(bb - bb0).max()) if bb is not None and bb0 is not None else float("inf")
-        results.append(_check(f"{n}.geom.orientation", di <= INERTIA_REL_TOL and db <= BBOX_TOL_MM,
-                              inertia_rel_err=round(di, 9), bbox_shift_mm=round(db, 6)))
+        off = (_off_surface(s, ref.shape), _off_surface(ref.shape, s))
+        results.append(_check(f"{n}.geom.orientation", di <= INERTIA_REL_TOL and db <= BBOX_TOL_MM and off == (0, 0),
+                              inertia_rel_err=round(di, 9), bbox_shift_mm=round(db, 6), points_off_surface=off))
         vp = rp.validation
         lacking = [k for k in ("volume", "area", "centroid") if k not in vp]
         if not lacking:

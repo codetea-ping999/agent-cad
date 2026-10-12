@@ -41,12 +41,13 @@ class PartSpec:
 
 def definitions(parts):
     """Group parts into shared definitions: the same B-rep with identical metadata
-    (e.g. repeated fasteners) is one product with several instances. Returns
+    (e.g. repeated fasteners) is one product with several instances, wherever each
+    instance is placed (the location is not part of the definition). Returns
     [(PartSpec, [indices])] in first-occurrence order."""
     out = []
     for i, ps in enumerate(parts):
         for d, idx in out:
-            if ps.shape.wrapped.IsSame(d.shape.wrapped) and (ps.name, tuple(ps.color), ps.material, ps.density_g_cm3) == \
+            if ps.shape.wrapped.IsPartner(d.shape.wrapped) and (ps.name, tuple(ps.color), ps.material, ps.density_g_cm3) == \
                     (d.name, tuple(d.color), d.material, d.density_g_cm3):
                 idx.append(i); break
         else:
@@ -85,21 +86,25 @@ def write_step(parts, path, assembly_name=None, author="agent-cad", organization
         asm = st.NewShape()
         TDataStd_Name.Set_s(asm, TCollection_ExtendedString(assembly_name or DEFAULT_ASSEMBLY))
     labels, comp = [], [None] * len(parts)
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy, BRepBuilderAPI_Transform
     for defn, idx in definitions(parts):
-        shp = defn.shape.wrapped
-        if any(shp.IsSame(d.shape.wrapped) for d, _ in labels):
+        # the definition is the unplaced B-rep; each instance's placement goes on its component
+        loc = defn.shape.wrapped.Location()
+        shp = defn.shape.wrapped.Located(TopLoc_Location())
+        if asm is None and not loc.IsIdentity():   # bare part: no component to carry the placement
+            shp = BRepBuilderAPI_Transform(shp, loc.Transformation(), True).Shape()
+        if any(shp.IsPartner(b) for _, b in labels):
             # same B-rep, different metadata: AddShape would reuse (and overwrite) the label
-            from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
             shp = BRepBuilderAPI_Copy(shp).Shape()
         ps = defn
         lab = st.AddShape(shp, False)
-        labels.append((defn, lab))
+        labels.append((lab, shp))
         for i in idx:
-            comp[i] = lab
+            comp[i] = (lab, parts[i].shape.wrapped.Location())
         TDataStd_Name.Set_s(lab, TCollection_ExtendedString(ps.name))
         r, g, b = ps.color
         ct.SetColor(lab, Quantity_Color(r, g, b, Quantity_TOC_RGB), XCAFDoc_ColorType.XCAFDoc_ColorSurf)
-        vol, area, cog = mass_props(ps.shape.wrapped)
+        vol, area, cog = mass_props(shp)              # in the definition's own frame
         XCAFDoc_Volume.Set_s(lab, vol)
         XCAFDoc_Area.Set_s(lab, area)
         XCAFDoc_Centroid.Set_s(lab, cog)
@@ -109,8 +114,8 @@ def write_step(parts, path, assembly_name=None, author="agent-cad", organization
                                h("density"), h("POSITIVE_RATIO_MEASURE"))
             mt.SetMaterial(lab, m)
     if asm is not None:
-        for lab in comp:                      # one component per part, in the caller's order
-            st.AddComponent(asm, lab, TopLoc_Location())
+        for lab, loc in comp:                 # one component per part, in the caller's order
+            st.AddComponent(asm, lab, loc)
     st.UpdateAssemblies()
     w = STEPCAFControl_Writer()  # constructor initialises the STEP statics; set ours afterwards
     Interface_Static.SetIVal_s("write.step.schema", AP242)
@@ -200,8 +205,11 @@ def read_step(path):
             for j in range(1, comps.Length() + 1):
                 ref = TDF_Label(); st.GetReferredShape_s(comps.Value(j), ref)
                 shp = st.GetShape_s(comps.Value(j))
-                parts.append(ReadPart(name(ref), Shape.cast(shp), color(ref), validation(ref) or validation(comps.Value(j)),
-                                      *material(ref)))
+                val = validation(ref) or validation(comps.Value(j))
+                if "centroid" in val:               # stored in the definition's frame: place it like the instance
+                    c = gp_Pnt(*val["centroid"]).Transformed(shp.Location().Transformation())
+                    val["centroid"] = (c.X(), c.Y(), c.Z())
+                parts.append(ReadPart(name(ref), Shape.cast(shp), color(ref), val, *material(ref)))
         else:
             parts.append(ReadPart(name(top), Shape.cast(st.GetShape_s(top)), color(top), validation(top), *material(top)))
     for rp in parts:
