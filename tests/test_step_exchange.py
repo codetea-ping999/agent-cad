@@ -292,3 +292,54 @@ def test_header_strings_cannot_fake_sections(parts, tmp_path):
     write_step(parts, str(path), "STEM_ASM", author="x DATA; FILE_SCHEMA(('OTHER'));", organization="it''s")
     rep = check_step(str(path), parts, "STEM_ASM")
     assert rep["pass"], failed(rep)
+
+
+def test_nested_assembly_reads_leaf_parts(tmp_path):
+    """TOP -> SUB (placed at x=100) -> LEAF (placed at y=10): the leaf comes back by
+    name, at the composed placement."""
+    from build123d import Box
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+    from OCP.STEPCAFControl import STEPCAFControl_Writer
+    from OCP.STEPControl import STEPControl_AsIs
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.gp import gp_Trsf, gp_Vec
+    from agent_cad.step_io import _new_doc
+
+    def at(x, y, z):
+        t = gp_Trsf(); t.SetTranslation(gp_Vec(x, y, z)); return TopLoc_Location(t)
+    doc = _new_doc(); st = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+    XCAFDoc_DocumentTool.SetLengthUnit_s(doc, 0.001)
+    named = lambda lab, s: TDataStd_Name.Set_s(lab, TCollection_ExtendedString(s))
+    leaf = st.AddShape(Box(10, 20, 30).wrapped, False); named(leaf, "LEAF")
+    sub = st.NewShape(); named(sub, "SUB"); st.AddComponent(sub, leaf, at(0, 10, 0))
+    top = st.NewShape(); named(top, "TOP"); st.AddComponent(top, sub, at(100, 0, 0))
+    st.UpdateAssemblies()
+    w = STEPCAFControl_Writer(); w.SetNameMode(True); w.Transfer(doc, STEPControl_AsIs)
+    path = tmp_path / "nested.step"; w.Write(str(path))
+    asm, rp = read_step(str(path))
+    assert asm == "TOP" and [p.name for p in rp] == ["LEAF"] and rp[0].path == ("TOP", "SUB")
+    c = rp[0].shape.center()
+    assert abs(c.X - 100) < 1e-6 and abs(c.Y - 10) < 1e-6 and abs(c.Z) < 1e-6
+    # same leaf, name and placement as a flat export, but an extra level: not what write_step wrote
+    from build123d import Pos
+    assert "struct.flat" in failed(check_step(str(path), [PartSpec("LEAF", Pos(100, 10, 0) * Box(10, 20, 30))], "TOP"))
+
+
+def test_reversed_instance_is_its_own_definition():
+    from build123d import Box, Shape
+    from agent_cad.step_io import definitions
+    b = Box(10, 10, 10)
+    parts = [PartSpec("P", b), PartSpec("P", Shape.cast(b.wrapped.Reversed()))]
+    assert len(definitions(parts)) == 2
+
+
+def test_reversed_solid_mesh_volume(tmp_path):
+    from build123d import Box, Shape
+    from agent_cad.verify.step_check import _mesh_volume
+    r = Shape.cast(Box(10, 20, 30).wrapped.Reversed())
+    assert abs(abs(_mesh_volume(r)) - 6000.0) < 1.0
+    path = tmp_path / "rev.step"; write_step([PartSpec("R", r)], str(path))
+    assert "R.mesh.volume" not in failed(check_step(str(path), [PartSpec("R", r)]))
+

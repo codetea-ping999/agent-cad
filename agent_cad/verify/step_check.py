@@ -184,9 +184,10 @@ def _off_surface(a, b, n=100, tol=1e-3):
     if not v:
         return None
     pts = v[::max(1, len(v) // n)]
+    c = BRepClass3d_SolidClassifier(b.wrapped)      # built once, queried per point
     off = 0
     for p in pts:
-        c = BRepClass3d_SolidClassifier(b.wrapped, gp_Pnt(p.X, p.Y, p.Z), tol)
+        c.Perform(gp_Pnt(p.X, p.Y, p.Z), tol)
         off += c.State() != TopAbs_ON
     return off
 
@@ -255,6 +256,10 @@ def check_step(path, reference, assembly_name=None):
     results.append(_check("text.solid_count", types["_solids"] == ndef, found=types["_solids"], expected=ndef))
     roots = {p.n_roots for p in parts} or {0}
     results.append(_check("struct.single_root", roots == {1}, roots=sorted(roots)))
+    # write_step exports flat: every part directly under the root (or a bare part)
+    want_path = (assembly_name,) if assembly_name else ()
+    paths = sorted({p.path for p in parts})
+    results.append(_check("struct.flat", all(p.path == want_path for p in parts), paths=[list(q) for q in paths]))
     for ref in reference:
         rp = by_name[ref.name].pop(0) if by_name.get(ref.name) else None
         if rp is None:
@@ -296,9 +301,9 @@ def check_step(path, reference, assembly_name=None):
         else:
             results.append(_check(f"{n}.geom.vs_validation_props", False, missing=lacking))
         mv = _mesh_volume(s)
-        if v > 0 and mv is not None:
-            results.append(_check(f"{n}.mesh.volume", abs(mv - v) <= MESH_REL_TOL * v,
-                                  mesh_volume_mm3=round(mv, 1), rel_err=round((mv - v) / v, 6)))
+        if abs(v) > 0 and mv is not None:   # magnitudes: a reversed solid has negative signed volumes
+            results.append(_check(f"{n}.mesh.volume", abs(abs(mv) - abs(v)) <= MESH_REL_TOL * abs(v),
+                                  mesh_volume_mm3=round(mv, 1), rel_err=round((abs(mv) - abs(v)) / abs(v), 6)))
         else:
             results.append(_check(f"{n}.mesh.volume", False, volume_mm3=v, note="no volume or no triangles"))
         tmax, emin = _tol_stats(s.wrapped)
