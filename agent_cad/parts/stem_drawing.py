@@ -163,7 +163,8 @@ def _body_sheet(p, body, dwg_no, size, k):
     # ---- measurements
     st_bore = max(find_cyl(body, (0, 0, 1), near=(0, 0, 0), inner=True), key=lambda c: c.r, default=None)
     st_out = max(find_cyl(body, (0, 0, 1), near=(0, 0, 0), inner=False), key=lambda c: c.r, default=None)
-    bar_bore = max((c for c in find_cyl(body, (0, 1, 0), inner=True) if c.r > 10), key=lambda c: c.r, default=None)
+    # the bar bore: the largest Y hole whose axis passes the bar axis (any size; pinch holes lie elsewhere)
+    bar_bore = max(find_cyl(body, (0, 1, 0), inner=True, near=(B.X, 0, B.Z)), key=lambda c: c.r, default=None)
     if None in (st_bore, st_out, bar_bore):
         return _unrecognised(p, size, "STEM_BODY", "ステム 本体 (STEM BODY)", f"{dwg_no or doc_no(p)}-01",
                              dict(steerer_bore=st_bore is not None, steerer_clamp=st_out is not None,
@@ -176,18 +177,32 @@ def _body_sheet(p, body, dwg_no, size, k):
     Sm = np.array([0, 0, (z0 + z1) / 2])
     L = np.linalg.norm(Bm - Sm); ang = math.degrees(math.atan2(Bm[2] - Sm[2], Bm[0] - Sm[0]))
     y0, y1 = bar_bore.axial_extent()
-    # lightening bore: the widest internal cylinder along the stem axis, whatever its size
-    # (of equal radii, the longest face: a sliver left where the bore meets another is not it)
-    light = max((c for c in find_cyl(body, dv, inner=True) if c.r > p.tap_drill_d / 2 + 0.1),
-                key=lambda c: (round(c.r, 3), np.subtract(*c.axial_extent()[::-1])), default=None)
+    # lightening bore: the internal cylinder along the stem axis whose axis lies inside the body
+    # section (faceplate taps are far off it), whatever its size; of several, the longest
+    # (a sliver left where the bore meets another is not it)
+    def off_axis(c):
+        rel = c.loc - Sm
+        return np.linalg.norm(rel - (rel @ dv) * dv)
+    light = min((c for c in find_cyl(body, dv, inner=True) if off_axis(c) < min(p.body_w, p.body_h) / 2 - c.r),
+                key=lambda c: (-round(np.subtract(*c.axial_extent()[::-1]), 3), off_axis(c)), default=None)
     D.need("light_bore", light is not None, 1)
     pinch = sorted(find_cyl(body, (0, 1, 0), r=p.bolt_clear_d / 2, inner=True), key=lambda c: c.loc[2])
     taps = find_cyl(body, dv, r=p.tap_drill_d / 2, inner=True)
     cbores = find_cyl(body, (0, 1, 0), r=p.cbore_d / 2, inner=True)
-    slot = sorted(y for y, f, _ in planes(body, (0, 1, 0)) if f.center().X < -st_bore.r and abs(f.center().Y) < 5)
+    slot_faces = [(y, f) for y, f, _ in planes(body, (0, 1, 0)) if f.center().X < -st_bore.r and abs(f.center().Y) < 5]
+    slot = sorted({round(y, 6) for y, _ in slot_faces})
     slot_w = slot[-1] - slot[0] if len(slot) >= 2 else float("nan")
     if len(slot) >= 2:                   # the split is symmetric about the stem plane (Y = 0)
         D.rec("slot_center_y", (slot[0] + slot[-1]) / 2, 0.0, "")
+        # the split runs through the whole clamp: across the clamp wall, each side face
+        # covers z0..z1 (sampled every ~1 mm); record the length it leaves uncovered
+        from build123d import Compound, Vector
+        xm = -(st_bore.r + st_out.r) / 2
+        zs = np.linspace(z0 + 0.25, z1 - 0.25, max(9, int(z1 - z0) + 1))
+        for side, ys in (("lo", slot[0]), ("hi", slot[-1])):
+            fs_ = Compound([f for y, f in slot_faces if abs(y - ys) < 1e-6])
+            miss = sum(fs_.distance_to(Vector(xm, ys, z)) > 1e-3 for z in zs)
+            D.rec(f"slot_{side}_uncovered", miss / len(zs) * (z1 - z0), 0.0, "")
     D.need("pinch_holes", len(pinch), 2); D.need("pinch_cbores", len(cbores), 2)
     D.need("fp_taps", len(taps), 4); D.need("slot", 0 if math.isnan(slot_w) else 1, 1)
     ptaps = find_cyl(body, (0, 1, 0), r=p.tap_drill_d / 2, inner=True)     # pinch threads, -Y ear
@@ -525,7 +540,7 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     Bm = np.array([B.X, B.Y, B.Z])
     sh = Sheet(size); D = _Dims(sh)
     kx, ky = size[0] / A3[0], size[1] / A3[1]
-    bore = max((c for c in find_cyl(fp, (0, 1, 0), inner=True) if c.r > 10), key=lambda c: c.r, default=None)
+    bore = max(find_cyl(fp, (0, 1, 0), inner=True, near=tuple(Bm)), key=lambda c: c.r, default=None)
     if bore is None:
         return _unrecognised(p, size, "STEM_FACEPLATE", "ステム フェイスプレート (FACEPLATE)",
                              f"{dwg_no or doc_no(p)}-02", dict(bar_bore=False))
@@ -608,6 +623,17 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     # the 4x callout says every counterbore is concentric with a clearance hole: check their axes too
     D.need("cbore_pattern", _corners([(c.loc[1] - Bm[1], (c.loc - Bm) @ nv) for c in cb], p.fp_bolt_w, p.fp_bolt_off), 4)
     D.each("bolt_clear_d", [2 * c.r for c in holes], p.bolt_clear_d, lambda v: f"φ{_fmt(v)}")   # all four
+
+    def span_d(c):                       # extent along d, whichever way the cylinder axis points
+        e = np.array(c.axial_extent()) * np.sign(c.axis @ dv)
+        return e.min() - Bm @ dv, e.max() - Bm @ dv
+    # "キリ" with no depth = through: each hole runs from the mating face to its counterbore bottom
+    for i, c in enumerate(holes):
+        h0, h1 = span_d(c)
+        mate = [o for o in cb if np.linalg.norm(np.cross(o.loc - c.loc, dv)) < 0.05]
+        sfx = "" if i == 0 else f"#{i + 1}"
+        D.rec("bolt_hole_from_mating_face" + sfx, h0 - t_back, 0.0, "")
+        D.rec("bolt_hole_to_cbore" + sfx, (span_d(mate[0])[0] - h1) if mate else float("inf"), 0.0, "")
     D.each("cbore_d", [2 * c.r for c in cb], p.cbore_d, lambda v: f"φ{_fmt(v)}")
     if len(holes) == 4:
         q = np.array([[c.loc[1], (c.loc - Bm) @ nv] for c in holes])

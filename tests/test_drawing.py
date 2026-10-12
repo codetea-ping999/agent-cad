@@ -415,3 +415,43 @@ def test_faceplate_bore_and_lightening_bore_are_on_their_axes():
     light = max((c for c in find_cyl(b, dv, inner=True) if c.r > p.tap_drill_d / 2 + 0.1), key=lambda c: c.r)
     bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, _refill_and_move(b, light, nv * 0.5))))}
     assert "dim.light_axis_offset" in bad and "dim.light_d" not in bad
+
+
+def test_narrow_lightening_bore_and_small_bar_are_recognised():
+    import dataclasses
+    p = dataclasses.replace(CASES[0], light_d=4.0)
+    dims = {d["name"]: d for d in stem_drawing.body_sheet(p, stem.build(p)[0]).meta["dims"]}
+    assert abs(dims["light_d"]["measured"] - 4.0) < 1e-3
+    p = dataclasses.replace(CASES[0], bar_d=20.0)
+    b, f = stem.build(p)
+    for sh in (stem_drawing.body_sheet(p, b), stem_drawing.faceplate_sheet(p, f)):
+        dims = {d["name"]: d for d in sh.meta["dims"]}
+        assert abs(dims["bar_bore_d"]["measured"] - 20.0) < 1e-3, sh.meta["part"]
+
+
+def test_slot_must_split_the_whole_clamp(monkeypatch):
+    p = CASES[0]
+    box = stem.Box
+
+    def short_slot(x, y, z, **kw):       # the slot cutter (3 x stack high) only 20 mm high
+        return box(x, y, p.stack_h - 20 if abs(y - p.slot_w) < 1e-9 and abs(z - 3 * p.stack_h) < 1e-9 else z, **kw)
+    monkeypatch.setattr(stem, "Box", short_slot)
+    b = stem.build(p)[0]
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, b)))}
+    assert {"dim.slot_lo_uncovered", "dim.slot_hi_uncovered"} <= bad and "dim.slot_w" not in bad
+
+
+def test_faceplate_bolt_holes_must_be_through():
+    from build123d import Cylinder, Plane, Align, Vector
+    from agent_cad.drawing.measure import find_cyl
+    import numpy as np
+    p = CASES[0]
+    f = stem.build(p)[1]
+    d, n, S, B = stem.frame(p)
+    dv = np.array([d.X, d.Y, d.Z])
+    c = find_cyl(f, dv, r=p.bolt_clear_d / 2, inner=True)[0]
+    e = np.array(c.axial_extent()) * np.sign(c.axis @ dv)
+    start = c.loc + dv * (e.min() - c.loc @ dv)
+    plug = Plane(origin=Vector(*start), z_dir=Vector(*dv)) * Cylinder(c.r + 0.01, 2.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + plug)))}
+    assert any(x.startswith("dim.bolt_hole_from_mating_face") for x in bad)
