@@ -575,3 +575,31 @@ def test_bar_bore_of_fastener_size_is_not_a_pinch_feature_and_thin_skins_show():
     skin = Plane(origin=Vector(*top), z_dir=Vector(*-dv)) * Cylinder(c.r + 0.01, 0.02, align=(Align.CENTER, Align.CENTER, Align.MIN))
     bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + skin)))}
     assert any(x.startswith("dim.cbore_open") for x in bad)
+
+
+def test_open_sections_slot_bridges_and_wide_faceplate_gap():
+    """A ring skin over a counterbore (open at the centre), a bridge across the slot away
+    from the probe line, both reported; a wide faceplate gap still finds the mating face."""
+    import dataclasses
+    import numpy as np
+    from build123d import Box, Cylinder, Plane, Pos, Align, Vector
+    from agent_cad.drawing.measure import find_cyl
+    p = CASES[0]
+    b, f = stem.build(p)
+    pin = min(find_cyl(b, (0, 1, 0), r=p.bolt_clear_d / 2, inner=True), key=lambda c: c.loc[2])
+    bridge = Pos(pin.loc[0] - p.bolt_clear_d, 0, pin.loc[2]) * Box(1.0, p.slot_w + 0.02, 1.0)
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, b + bridge)))}
+    assert "dim.slot_bridged_mm3" in bad
+    d, n, S, B = stem.frame(p)
+    dv = np.array([d.X, d.Y, d.Z])
+    c = find_cyl(f, dv, r=p.cbore_d / 2, inner=True)[0]
+    top = c.loc + dv * (max(np.array(c.axial_extent()) * np.sign(c.axis @ dv)) - c.loc @ dv)
+    pl = Plane(origin=Vector(*top), z_dir=Vector(*-dv))
+    ring = pl * (Cylinder(c.r + 0.01, 0.3, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                 - Cylinder(p.bolt_clear_d / 2 + 1.0, 0.3, align=(Align.CENTER, Align.CENTER, Align.MIN)))
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + ring)))}
+    assert any(x.startswith("dim.cbore_open") for x in bad)
+    q = dataclasses.replace(p, fp_gap=12.0)          # mating face 6 mm behind the bar axis
+    dims = {x["name"]: x for x in stem_drawing.body_sheet(q, stem.build(q)[0]).meta["dims"]}
+    assert "fp_tap_on_mating_face#4" in dims
+    assert all(abs(dims[k]["measured"]) < 1e-3 for k in dims if k.startswith("fp_tap_on_mating_face")), dims
