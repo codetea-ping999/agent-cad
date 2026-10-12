@@ -3,7 +3,7 @@
 - dims:     every dimension measured from the B-rep equals the design intent
 - fits:     toleranced sizes carry the JIS B 0401 deviations of their fit code
 - features: every required feature (holes, taps, sections) was found on the model
-- content:  title block, general tolerance, roughness and projection method present
+- content:  title block, general tolerance, roughness (general and local) and projection method present
 - layout:   no two texts overlap and nothing leaves the drawing frame
 """
 import math, re
@@ -43,6 +43,8 @@ def check_sheet(sheet):
         any("JIS B 0405" in n for n in sheet.meta.get("notes", [])))
     add("content.general_roughness", bool(sheet.meta.get("roughness_general")))
     add("content.finish", bool(sheet.meta.get("finish")), finish=sheet.meta.get("finish"))
+    for r in sheet.meta.get("roughness_local", []):    # local surface texture shown where the design asks for it
+        add(f"content.roughness.{r['name']}", r["drawn"] == r["required"], drawn=r["drawn"], required=r["required"])
     add("content.views", len(sheet.views) >= 2, views=[v.name for v in sheet.views])
     # layout
     texts = [it for it in sheet.items if it[0] == "text"]

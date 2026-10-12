@@ -209,3 +209,72 @@ def test_pinch_taps_are_measured():
     dims = {d["name"]: d for d in stem_drawing.body_sheet(p, stem.build(p)[0]).meta["dims"]}
     assert abs(dims["pinch_tap_drill_d"]["measured"] - p.tap_drill_d) < 1e-3
     assert abs(dims["pinch_tap_length"]["measured"] - (p.ear_half_w - p.slot_w / 2)) < 1e-3   # drilled through
+
+
+def test_fit_deviations_follow_the_printed_nominal():
+    """30.004 prints as φ30: the deviations must be those of the 18-30 band, as check_sheet reads them."""
+    text, tol = stem_drawing._fit_text(30.004, "F8")
+    up, lo = jis.fit_deviations(30.0, "F8")
+    assert text == "φ30 F8" and tol == (f"{up:+.3f}", f"{lo:+.3f}")
+
+
+def test_lightening_bore_of_another_size_is_reported():
+    p = stem.StemParams()
+    b, _ = stem.build(stem.StemParams(light_d=p.light_d + 2))
+    rep = check_sheet(stem_drawing.body_sheet(p, b))          # must not raise
+    bad = {c["check"] for c in failed(rep)}
+    assert "dim.light_d" in bad and "feature.light_bore" not in bad
+
+
+def test_body_retries_at_a_smaller_scale(monkeypatch):
+    from agent_cad.drawing.sheet import A2
+    p = CASES[0]
+    b = stem.build(p)[0]
+    monkeypatch.setattr(stem_drawing, "BODY_TRIES", [((150.0, 105.0), 1.0), (A2, 0.5)])   # 1:1 cannot fit
+    sh = stem_drawing.body_sheet(p, b)
+    assert sh.meta["title_block"]["尺度"] == "1:2" and len(sh.views) >= 4
+    rep = check_sheet(sh)
+    assert rep["pass"], failed(rep)
+    monkeypatch.setattr(stem_drawing, "BODY_TRIES", [((150.0, 105.0), 1.0)])
+    with pytest.raises(ValueError, match="do not fit"):
+        stem_drawing.body_sheet(p, b)
+
+
+def test_counterbores_must_sit_on_the_holes():
+    from build123d import Cylinder, Plane, Align, Vector
+    from agent_cad.drawing.measure import find_cyl
+    import numpy as np
+    p = CASES[0]
+    f = stem.build(p)[1]
+    d, n, S, B = stem.frame(p)
+    dv, nv = np.array([d.X, d.Y, d.Z]), np.array([n.X, n.Y, n.Z])
+    c = find_cyl(f, dv, r=p.cbore_d / 2, inner=True)[0]
+    e0, e1 = c.axial_extent()
+    base = c.loc + dv * (e0 - c.loc @ dv)
+
+    def cyl(at):
+        return Plane(origin=Vector(*at), z_dir=Vector(*dv)) * Cylinder(c.r, e1 - e0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    bad = (f + cyl(base)) - cyl(base + nv * 2.0)             # one counterbore moved 2 mm off its hole
+    rep = check_sheet(stem_drawing.faceplate_sheet(p, bad))
+    assert "feature.cbore_pattern" in {c["check"] for c in failed(rep)}
+    assert "feature.bolt_pattern" not in {c["check"] for c in failed(rep)}
+
+
+def test_local_roughness_is_shown_and_checked():
+    p = CASES[0]
+    b, f = stem.build(p)
+    fp = stem_drawing.faceplate_sheet(p, f)
+    body = stem_drawing.body_sheet(p, b)
+    assert {(r["name"], r["drawn"]) for r in fp.meta["roughness_local"]} >= {("mating_face", "1.6"), ("bar_bore", "1.6")}
+    assert {r["name"] for r in body.meta["roughness_local"]} >= {"mating_face", "bar_bore", "steerer_bore"}
+    fp.meta["roughness_local"][0]["drawn"] = None
+    assert any(c["check"].startswith("content.roughness.") for c in failed(check_sheet(fp)))
+
+
+def test_general_tolerance_bands_are_unambiguous():
+    p = CASES[0]
+    sh = stem_drawing.faceplate_sheet(p, stem.build(p)[1])
+    texts = [it[3] for it in sh.items if it[0] == "text"]
+    assert {"0.5以上", "3以下", "30を超え", "120以下"} <= set(texts)
+    import re
+    assert not any(re.fullmatch(r"[\d.]+〜[\d.]+", t) for t in texts)
