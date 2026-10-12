@@ -555,3 +555,23 @@ def test_pdf_hatch_uses_the_declared_width(tmp_path):
     p = CASES[0]
     to_pdf(stem_drawing.body_sheet(p, stem.build(p)[0]), tmp_path / "b.pdf")
     assert abs(matplotlib.rcParams["hatch.linewidth"] - STYLES["hatch"][0] * PT_PER_MM) < 1e-9
+
+
+def test_bar_bore_of_fastener_size_is_not_a_pinch_feature_and_thin_skins_show():
+    import dataclasses
+    import numpy as np
+    from build123d import Cylinder, Plane, Align, Vector
+    from agent_cad.drawing.measure import find_cyl
+    p = CASES[0]
+    for bar in (p.cbore_d, p.bolt_clear_d, p.tap_drill_d):
+        q = dataclasses.replace(p, bar_d=bar)
+        feats = {f["name"]: f for f in stem_drawing.body_sheet(q, stem.build(q)[0]).meta["features"]}
+        assert all(feats[k]["found"] == 2 for k in ("pinch_holes", "pinch_cbores", "pinch_taps")), (bar, feats)
+    f = stem.build(p)[1]
+    d, n, S, B = stem.frame(p)
+    dv = np.array([d.X, d.Y, d.Z])
+    c = find_cyl(f, dv, r=p.cbore_d / 2, inner=True)[0]
+    top = c.loc + dv * (max(np.array(c.axial_extent()) * np.sign(c.axis @ dv)) - c.loc @ dv)
+    skin = Plane(origin=Vector(*top), z_dir=Vector(*-dv)) * Cylinder(c.r + 0.01, 0.02, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + skin)))}
+    assert any(x.startswith("dim.cbore_open") for x in bad)
