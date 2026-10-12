@@ -184,9 +184,10 @@ def _off_surface(a, b, n=100, tol=1e-3):
     if not v:
         return None
     pts = v[::max(1, len(v) // n)]
+    c = BRepClass3d_SolidClassifier(b.wrapped)      # built once, queried per point
     off = 0
     for p in pts:
-        c = BRepClass3d_SolidClassifier(b.wrapped, gp_Pnt(p.X, p.Y, p.Z), tol)
+        c.Perform(gp_Pnt(p.X, p.Y, p.Z), tol)
         off += c.State() != TopAbs_ON
     return off
 

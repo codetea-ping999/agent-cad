@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from OCP.TDocStd import TDocStd_Document
 from OCP.TCollection import TCollection_ExtendedString, TCollection_HAsciiString, TCollection_AsciiString
-from OCP.XCAFDoc import (XCAFDoc, XCAFDoc_ColorTool, XCAFDoc_DocumentTool, XCAFDoc_Volume, XCAFDoc_Area,
+from OCP.XCAFDoc import (XCAFDoc, XCAFDoc_ShapeTool, XCAFDoc_ColorTool, XCAFDoc_DocumentTool, XCAFDoc_Volume, XCAFDoc_Area,
                          XCAFDoc_Centroid, XCAFDoc_ColorType, XCAFDoc_Material, XCAFDoc_MaterialTool)
 from OCP.TDataStd import TDataStd_TreeNode
 from OCP.XCAFApp import XCAFApp_Application
@@ -47,7 +47,8 @@ def definitions(parts):
     out = []
     for i, ps in enumerate(parts):
         for d, idx in out:
-            if ps.shape.wrapped.IsPartner(d.shape.wrapped) and (ps.name, tuple(ps.color), ps.material, ps.density_g_cm3) == \
+            a, b = ps.shape.wrapped, d.shape.wrapped        # same B-rep and orientation, any location
+            if a.IsPartner(b) and a.Orientation() == b.Orientation() and (ps.name, tuple(ps.color), ps.material, ps.density_g_cm3) == \
                     (d.name, tuple(d.color), d.material, d.density_g_cm3):
                 idx.append(i); break
         else:
@@ -197,19 +198,31 @@ def read_step(path):
 
     free = TDF_LabelSequence(); st.GetFreeShapes(free)
     asm_name, parts = None, []
+
+    def walk(assembly, placed):
+        """Leaf parts of an assembly, through any depth of subassemblies, each placed
+        by the product of the component locations above it."""
+        comps = TDF_LabelSequence(); st.GetComponents_s(assembly, comps, False)
+        for j in range(1, comps.Length() + 1):
+            comp = comps.Value(j)
+            ref = TDF_Label(); st.GetReferredShape_s(comp, ref)
+            loc = placed.Multiplied(XCAFDoc_ShapeTool.GetLocation_s(comp))
+            if st.IsAssembly_s(ref):
+                walk(ref, loc)
+                continue
+            base = st.GetShape_s(ref)
+            shp = base.Located(loc.Multiplied(base.Location()))
+            val = validation(ref) or validation(comp)
+            if "centroid" in val:               # stored in the definition's frame: place it like the instance
+                c = gp_Pnt(*val["centroid"]).Transformed(loc.Transformation())
+                val["centroid"] = (c.X(), c.Y(), c.Z())
+            parts.append(ReadPart(name(ref), Shape.cast(shp), color(ref), val, *material(ref)))
+
     for i in range(1, free.Length() + 1):
         top = free.Value(i)
         if st.IsAssembly_s(top):
             asm_name = name(top)
-            comps = TDF_LabelSequence(); st.GetComponents_s(top, comps, False)
-            for j in range(1, comps.Length() + 1):
-                ref = TDF_Label(); st.GetReferredShape_s(comps.Value(j), ref)
-                shp = st.GetShape_s(comps.Value(j))
-                val = validation(ref) or validation(comps.Value(j))
-                if "centroid" in val:               # stored in the definition's frame: place it like the instance
-                    c = gp_Pnt(*val["centroid"]).Transformed(shp.Location().Transformation())
-                    val["centroid"] = (c.X(), c.Y(), c.Z())
-                parts.append(ReadPart(name(ref), Shape.cast(shp), color(ref), val, *material(ref)))
+            walk(top, TopLoc_Location())
         else:
             parts.append(ReadPart(name(top), Shape.cast(st.GetShape_s(top)), color(top), validation(top), *material(top)))
     for rp in parts:
