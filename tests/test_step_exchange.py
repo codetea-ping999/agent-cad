@@ -151,3 +151,59 @@ def test_default_assembly_name_matches(parts, tmp_path):
     write_step(parts, str(p))
     rep = check_step(str(p), parts)
     assert rep["pass"], failed(rep)
+
+
+def test_part21_lexing():
+    from agent_cad.verify.step_check import _scrub, _entities
+    data = """
+  #1 = PRODUCT('owner''s part #77','',(#2));   /* owner's note #999 */
+#2=PRODUCT_CONTEXT('',#3,
+   'mechanical');
+#3 = ( LENGTH_UNIT() NAMED_UNIT(*)
+       SI_UNIT(.MILLI.,
+               .METRE.) );
+#4 = BREP_WITH_VOIDS('',#5,());
+#5 = CLOSED_SHELL('',());
+"""
+    ents = _entities(_scrub(data))
+    assert set(ents) == {"1", "2", "3", "4", "5"}                    # indented / multi-line definitions
+    assert ents["1"][1].count("#") == 1                              # only #2: string and comment ignored
+    assert "SI_UNIT(.MILLI.,.METRE.)" in ents["3"][1] and ents["4"][0] == "BREP_WITH_VOIDS"
+
+
+def test_unit_text_in_a_string_does_not_pass(parts, asm_file, tmp_path):
+    txt = asm_file.read_text(encoding="latin-1").replace("SI_UNIT(.MILLI.,.METRE.)", "SI_UNIT(.CENTI.,.METRE.)")
+    txt = txt.replace("PRODUCT('STEM_BODY'", "PRODUCT('STEM_BODY SI_UNIT(.MILLI.,.METRE.)'", 1)
+    p = tmp_path / "fake.step"; p.write_text(txt, encoding="latin-1")
+    assert "header.unit_mm" in failed(check_step(str(p), parts, "STEM_ASM"))
+
+
+def test_same_shape_with_different_metadata(tmp_path):
+    from build123d import Box
+    b = Box(10, 10, 10)
+    parts = [PartSpec("A", b, (1, 0, 0)), PartSpec("B", b, (0, 1, 0))]
+    path = tmp_path / "same.step"; write_step(parts, str(path), "ASM")
+    _, rp = read_step(str(path))
+    assert sorted((p.name, p.color) for p in rp) == [("A", (1.0, 0.0, 0.0)), ("B", (0.0, 1.0, 0.0))]
+    assert check_step(str(path), parts, "ASM")["pass"]
+
+
+def test_repeated_instances_share_one_definition(tmp_path):
+    from build123d import Box
+    b = Box(10, 10, 10)
+    parts = [PartSpec("BOLT", b), PartSpec("BOLT", b)]
+    path = tmp_path / "rep.step"; write_step(parts, str(path), "ASM")
+    rep = check_step(str(path), parts, "ASM")
+    assert rep["pass"], failed(rep)
+
+
+def test_multiple_roots_are_rejected(tmp_path):
+    from build123d import Box, Pos
+    from OCP.STEPControl import STEPControl_Writer, STEPControl_AsIs
+    w = STEPControl_Writer()
+    a, b = Box(10, 10, 10), Pos(30, 0, 0) * Box(10, 10, 10)
+    w.Transfer(a.wrapped, STEPControl_AsIs); w.Transfer(b.wrapped, STEPControl_AsIs)
+    path = tmp_path / "roots.step"; w.Write(str(path))
+    _, rp = read_step(str(path))
+    assert {p.n_roots for p in rp} == {2}
+    assert "struct.single_root" in failed(check_step(str(path), [PartSpec("", a), PartSpec("", b)]))
