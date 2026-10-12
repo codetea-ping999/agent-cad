@@ -220,7 +220,7 @@ def checks(p, body_part, faceplate):
         "body_side_around_lightening": round((min(p.body_w, we) - p.light_d) / 2, 2),
         "body_top_around_lightening": round((min(p.body_h, he) - p.light_d) / 2, 2),
     }
-    res["thread_engagement_mm"] = {"pinch": round(p.ear_half_w - p.slot_w / 2, 2), "faceplate": p.tap_depth}
+    res["thread_engagement_mm"] = thread_depths(p)      # the usable depths the drawing calls out
     mass = (body_part.volume + faceplate.volume) / 1000 * rho
     res["mass_g"] = {"body": round(body_part.volume / 1000 * rho, 1), "faceplate": round(faceplate.volume / 1000 * rho, 1), "total_excl_bolts": round(mass, 1)}
     MIN_WALL = 1.5
@@ -230,6 +230,23 @@ def checks(p, body_part, faceplate):
                        and min(res["thread_engagement_mm"].values()) >= 1.5 * 5
                        and mass <= p.mass_target_g)
     return res
+
+TAP_RUNOUT = 2.0       # blind tapped hole: incomplete thread at the drill bottom (plug tap)
+TAP_LEAD_IN = 1.0      # through tapped hole: entry chamfer and first incomplete turn
+
+
+def usable_thread(length, through):
+    """Full-thread depth of a tapped hole whose drill is `length` long, rounded down to
+    0.5 mm: the value a drawing calls out and the engagement rule must use."""
+    return math.floor((length - (TAP_LEAD_IN if through else TAP_RUNOUT)) * 2 + 1e-6) / 2
+
+
+def thread_depths(p):
+    """Usable M5 thread in the body: pinch ears (tapped through the -Y ear) and
+    faceplate bolts (blind, tap_depth = drill depth)."""
+    return {"pinch": usable_thread(p.ear_half_w - p.slot_w / 2, through=True),
+            "faceplate": usable_thread(p.tap_depth, through=False)}
+
 
 if __name__ == "__main__":
     import argparse

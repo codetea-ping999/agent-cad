@@ -341,3 +341,59 @@ def test_step_products_carry_the_drawing_number():
     body, fp = part_specs(p, b, f)
     assert body.name.startswith(stem_drawing.body_sheet(p, b).meta["title_block"]["図番"])
     assert fp.name.startswith(stem_drawing.doc_no(p) + "-02")
+
+
+def _refill_and_move(shape, c, shift):
+    """Fill the cylindrical hole `c` and cut the same hole again, moved by `shift`."""
+    from build123d import Cylinder, Plane, Align, Vector
+    import numpy as np
+    e0, e1 = c.axial_extent()
+    base = c.loc + c.axis * (e0 - c.loc @ c.axis)
+
+    def cyl(at):
+        return Plane(origin=Vector(*at), z_dir=Vector(*c.axis)) * Cylinder(
+            c.r, e1 - e0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    return (shape + cyl(base)) - cyl(base + np.asarray(shift, float))
+
+
+def test_steerer_bore_must_be_concentric_with_the_clamp():
+    from agent_cad.drawing.measure import find_cyl
+    p = CASES[0]
+    b = stem.build(p)[0]
+    bore = max(find_cyl(b, (0, 0, 1), near=(0, 0, 0), inner=True), key=lambda c: c.r)
+    rep = check_sheet(stem_drawing.body_sheet(p, _refill_and_move(b, bore, (0.4, 0, 0))))
+    bad = {c["check"] for c in failed(rep)}
+    assert "dim.steerer_bore_axis_offset" in bad and "dim.steerer_bore_d" not in bad
+
+
+def test_both_pinch_holes_are_located():
+    from agent_cad.drawing.measure import find_cyl
+    p = CASES[0]
+    b = stem.build(p)[0]
+    hole = max(find_cyl(b, (0, 1, 0), r=p.bolt_clear_d / 2, inner=True), key=lambda c: c.loc[2])
+    rep = check_sheet(stem_drawing.body_sheet(p, _refill_and_move(b, hole, (-1.0, 0, 0))))
+    bad = {c["check"] for c in failed(rep)}
+    assert {"dim.pinch_hole_x#2", "dim.pinch_cbore_coaxial#2"} <= bad
+    assert "dim.pinch_pitch" not in bad and "dim.pinch_bolt_x" not in bad
+
+
+def test_engagement_rule_uses_the_called_out_thread_depth():
+    p = CASES[0]
+    b, f = stem.build(p)
+    dims = {d["name"]: d for d in stem_drawing.body_sheet(p, b).meta["dims"]}
+    eng = stem.checks(p, b, f)["thread_engagement_mm"]
+    assert eng["faceplate"] == dims["fp_thread_depth"]["measured"] == p.tap_depth - stem.TAP_RUNOUT
+    assert eng["pinch"] == dims["pinch_thread_depth"]["measured"]
+    # an 8 mm drill gives 6 mm of full thread: below 1.5 d for M5, whatever the drill depth
+    assert stem.usable_thread(8.0, through=False) == 6.0 < 7.5
+
+
+def test_window_must_be_centred(monkeypatch):
+    from build123d import Pos
+    orig = stem._window_profile
+    monkeypatch.setattr(stem, "_window_profile", lambda p: Pos(1.0, 0) * orig(p))   # 1 mm across (Y)
+    p = CASES[0]
+    rep = check_sheet(stem_drawing.faceplate_sheet(p, stem.build(p)[1]))
+    bad = {c["check"] for c in failed(rep)}
+    assert "dim.window_center_y" in bad
+    assert not bad & {"dim.window_w", "dim.window_h", "dim.window_r"}
