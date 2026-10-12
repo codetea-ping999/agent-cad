@@ -40,6 +40,10 @@ class _Dims:
         self.sheet.meta["dims"].append(dict(name=name, measured=round(float(measured), 4),
                                             intent=float(intent), text=text, tol=tol))
 
+    def need(self, name, found, expected):
+        """Required feature: check_sheet fails if the model does not have it."""
+        self.sheet.meta.setdefault("features", []).append(dict(name=name, found=int(found), expected=int(expected)))
+
 
 def _notes(sh, lines, pos):
     x, y = pos
@@ -119,6 +123,8 @@ def body_sheet(p: stem.StemParams, body, faceplate=None, dwg_no=None):
     cbores = find_cyl(body, (0, 1, 0), r=p.cbore_d / 2, inner=True)
     slot = sorted(y for y, f, _ in planes(body, (0, 1, 0)) if f.center().X < -st_bore.r and abs(f.center().Y) < 5)
     slot_w = slot[-1] - slot[0] if len(slot) >= 2 else float("nan")
+    D.need("pinch_holes", len(pinch), 2); D.need("pinch_cbores", len(cbores), 2)
+    D.need("fp_taps", len(taps), 4); D.need("slot", 0 if math.isnan(slot_w) else 1, 1)
 
     # ---- views (third angle): left | front section A-A | aux B ; top above front
     def mk():
@@ -134,7 +140,8 @@ def body_sheet(p: stem.StemParams, body, faceplate=None, dwg_no=None):
     mass = body.volume / 1000 * rho
     _title(sh, p, "ステム 本体 (STEM BODY)", f"{dwg_no or doc_no(p)}-01", mass)
     _notes(sh, _common_notes(p, [f"※ φ{_fmt(2 * bar_bore.r)} はフェイスプレートと組み付けた状態で仕上げる (共加工)。",
-                                 "ピンチボルト締結トルク 5〜6 N·m、フェイスプレート 4〜5 N·m (参考)。"]), (16, 106))
+                                 "ピンチボルト締結トルク 5〜6 N·m、フェイスプレート 4〜5 N·m (参考)。",
+                                 "図示なき外形形状は3Dモデル (STEP AP242、同図番) による。"]), (16, 106))
     _general_tol_table(sh, (16, 36))
     fb, tb, ab = front.bbox(), top.bbox(), aux.bbox()
     sh.text(((ab[0][0] + ab[1][0]) / 2, ab[1][1] + 14), "B 矢視", 5, 0, "center", "bottom")
@@ -153,6 +160,12 @@ def body_sheet(p: stem.StemParams, body, faceplate=None, dwg_no=None):
         sh.center_mark(front.to_sheet(c.loc), c.r)
     for c in taps:
         sh.center_mark(aux.to_sheet(c.loc), c.r, ext=2)
+
+    # ---- cutting planes of the tube sections near both clamps (before dims, which avoid them)
+    hmax = max(p.body_h, p.body_h_end or p.body_h)
+    cuts = _section_cuts(sh, p, front, Sm, dv, nv,
+                         [("D", st_out.r + 0.5 * hmax * abs(math.sin(math.radians(ang))) + p.junction_r + 3),
+                          ("E", L - bar_bore.r - p.bar_wall - p.junction_r - 3)])
 
     # ---- dimensions: front section
     fs = front.to_sheet
@@ -190,6 +203,9 @@ def body_sheet(p: stem.StemParams, body, faceplate=None, dwg_no=None):
         D.rec("pinch_bolt_x", -bx, p.steerer_d / 2 + p.pinch_wall + p.bolt_clear_d / 2, _fmt(-bx))
         cb_lo, cb_hi = cbores[0].axial_extent() if cbores else (0.0, 0.0)
         D.rec("pinch_cbore_depth", cb_hi - cb_lo, p.cbore_depth, _fmt(cb_hi - cb_lo))
+        D.rec("pinch_clear_d", 2 * pinch[0].r, p.bolt_clear_d, f"φ{_fmt(2 * pinch[0].r)}")
+        if cbores:
+            D.rec("pinch_cbore_d", 2 * cbores[0].r, p.cbore_d, f"φ{_fmt(2 * cbores[0].r)}")
         lb = left.bbox()
         sh.leader(fs(pinch[0].loc - (0, 0, pinch[0].r * 0.7)),
                   [lb[0] + (-4, -12), lb[0] + (-4, -22), (lb[0][0] - 4, lb[1][1] + 26)], "", right=True,
@@ -225,11 +241,15 @@ def body_sheet(p: stem.StemParams, body, faceplate=None, dwg_no=None):
         tr = taps[int(np.argmax(q[:, 0] + q[:, 1]))].loc
         e0, e1 = taps[0].axial_extent()      # opens on the mating face, so the extent is the drill depth
         D.rec("fp_tap_drill_depth", e1 - e0, p.tap_depth, _fmt(e1 - e0))
+        D.rec("fp_tap_drill_d", 2 * taps[0].r, p.tap_drill_d, f"φ{_fmt(2 * taps[0].r)}")
         sh.leader(aux.to_sheet(tr) + (1.2, 1.2), [(ab[1][0] + 4, ab[1][1] + 4), (ab[0][0] - 4, ab[1][1] + 4)], "",
                   lines=[f"4×M5×0.8 深さ{_fmt(e1 - e0 - 2)}", f"  下穴φ{_fmt(2 * taps[0].r)} 深さ{_fmt(e1 - e0)}"])
         w_, h_ = sh.fcf((ab[0][0], ab[0][1] - 26), ["flatness", "0.05"])
         sh.text((ab[0][0], ab[0][1] - 32), "合わせ面 (図示面)", 3, 0, "left", "bottom")
         sh.roughness((ab[0][0] + w_ + 6, ab[0][1] - 26), RA_FACE)
+
+    # ---- removed sections D-D, E-E (views placed last, in the space left over)
+    _body_sections(sh, D, p, body, Sm, dv, cuts)
 
     # section label under everything drawn below the front view
     ys = [it[2] for it in sh.items if it[0] == "text" and fb[0][0] - 20 < it[1] < fb[1][0] + 20 and 112 < it[2] < fb[0][1]]
@@ -237,6 +257,90 @@ def body_sheet(p: stem.StemParams, body, faceplate=None, dwg_no=None):
     sh.text(((fb[0][0] + fb[1][0]) / 2, min(ys + [fb[0][1]]) - 4), "A-A", 5, 0, "center", "top")
     sh.meta["part"] = "STEM_BODY"
     return sh
+
+
+def _section_cuts(sh, p, front, Sm, dv, nv, stations):
+    """Cutting planes for the removed tube sections, drawn before the dimensions so
+    those avoid them: a station near the nominal one whose line and labels clear text."""
+    he = p.body_h_end or p.body_h
+    fs = front.to_sheet
+    look = fs(Sm + dv) - fs(Sm); lk = look / np.linalg.norm(look)
+    sh._opts = None
+    texts = [text_box((it[1], it[2]), it[3], it[4], it[5], it[6], it[7]) for it in sh.items if it[0] == "text"]
+    cuts = []
+    for lab, t0 in stations:
+        best = None
+        for dt in (0, 3, 6, 9, 12) if lab == "D" else (0, -3, -6, -9, -12):   # move away from the clamp only
+            for k in (7, 12, 4):
+                t = t0 + dt
+                hi = p.body_h + (he - p.body_h) * t / p.length
+                a, b = fs(Sm + dv * t + nv * (0.5 * hi + k)), fs(Sm + dv * t - nv * (0.5 * hi + k))
+                u = (b - a) / np.linalg.norm(b - a)
+                seg = np.vstack([a - u * 5 + np.outer(np.linspace(0, 1, 60), (b - a) + u * 10),
+                                 a + np.outer(np.linspace(0, 1, 8), lk * 7), b + np.outer(np.linspace(0, 1, 8), lk * 7)])
+                hit = any(((seg[:, 0] > t_[0][0] - 0.5) & (seg[:, 0] < t_[1][0] + 0.5) &
+                           (seg[:, 1] > t_[0][1] - 0.5) & (seg[:, 1] < t_[1][1] + 0.5)).any() for t_ in texts)
+                if not hit and all(sh.is_free(text_box(q, lab, 5, 0, "center", "center"), pad=1)
+                                   for q in (a - u * 4 + lk * 3, b + u * 4 + lk * 3)):
+                    best = (t, a, b); break
+            if best:
+                break
+        t, a, b = best or (t0, fs(Sm + dv * t0 + nv * 20), fs(Sm + dv * t0 - nv * 20))
+        sh.section_line(a, b, lab, look=look)
+        cuts.append((lab, t))
+    sh._opts = None
+    return cuts
+
+
+def _body_sections(sh, D, p, body, Sm, dv, cuts):
+    """Removed sections of the lofted tube: width/height measured on the solid and
+    checked against the loft (linear between the end sections)."""
+    from build123d import Plane, Vector
+    we, he = (p.body_w_end or p.body_w), (p.body_h_end or p.body_h)
+    placed = []
+    for lab, t in reversed(cuts):      # placed right to left, so D ends up left of E
+        c = Sm + dv * t
+        sec = body.intersect(Plane(origin=Vector(*c), x_dir=Vector(0, 1, 0), z_dir=Vector(*dv)))
+        faces = sec.faces() if sec is not None else []
+        D.need(f"section_{lab}", len(faces), 1)
+        if len(faces) != 1:
+            continue
+        v = View(f"{lab}-{lab}", faces[0], tuple(dv), (0, -1, 0), (0, 0)).build()
+        v.cut_faces = [[np.array([v.to_sheet(q) for e in w.edges() for q in _pts(e)]) for w in faces[0].wires()]]
+        b0, b1 = v.bbox()
+        w_, h_ = b1 - b0
+        # free spot for the view plus its dimensions and label
+        need = (w_ + 22, h_ + 26)
+        W, H = sh.size
+        spot = None
+        for y in np.arange(H - 20 - need[1], 112, -4.0):
+            for x in np.arange(W - 20 - need[0], 20, -4.0):
+                box = (np.array([x, y]), np.array([x + need[0], y + need[1]]))
+                if sh.is_free(box, pad=2) and not any(_boxes_hit(box, q) for q in placed):
+                    spot = box; break
+            if spot:
+                break
+        D.need(f"section_{lab}_placed", spot is not None, 1)
+        if spot is None:
+            continue
+        placed.append(spot)
+        v.shift(*(spot[0] + (12, 12) - b0))
+        sh.add_view(v, built=True); sh._opts = None
+        b0, b1 = v.bbox()
+        sh.text(((b0[0] + b1[0]) / 2, b1[1] + 5), f"{lab}-{lab}", 5, 0, "center", "bottom")
+        ww, hh = (b1 - b0)
+        wi, hi = p.body_w + (we - p.body_w) * t / p.length, p.body_h + (he - p.body_h) * t / p.length
+        sh.dim((b0[0], b0[1]), (b1[0], b0[1]), -7, _fmt(ww))
+        sh.dim((b1[0], b0[1]), (b1[0], b1[1]), -7, _fmt(hh), u=(0, 1))
+        D.rec(f"section_{lab}_w", ww, wi, _fmt(ww)); D.rec(f"section_{lab}_h", hh, hi, _fmt(hh))
+
+
+def _pts(e, n=24):
+    return [np.array(tuple(e.position_at(k / n))) for k in range(n + 1)]
+
+
+def _boxes_hit(a, b):
+    return not (a[1][0] < b[0][0] or b[1][0] < a[0][0] or a[1][1] < b[0][1] or b[1][1] < a[0][1])
 
 
 # ======================================================================= faceplate
@@ -346,6 +450,11 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     D.rec("width", y1 - y0, p.bar_clamp_w, _fmt(y1 - y0))
     for c in holes:
         sh.center_mark(fs(c.loc), scale * c.r, 2)
+    D.need("bolt_holes", len(holes), 4); D.need("cbores", len(cb), 4)
+    if holes:
+        D.rec("bolt_clear_d", 2 * holes[0].r, p.bolt_clear_d, f"φ{_fmt(2 * holes[0].r)}")
+    if cb:
+        D.rec("cbore_d", 2 * cb[0].r, p.cbore_d, f"φ{_fmt(2 * cb[0].r)}")
     if len(holes) == 4:
         q = np.array([[c.loc[1], (c.loc - Bm) @ nv] for c in holes])
         wy, hn = np.ptp(q[:, 0]), np.ptp(q[:, 1])

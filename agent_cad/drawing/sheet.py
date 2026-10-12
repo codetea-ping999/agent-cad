@@ -466,11 +466,14 @@ class Sheet:
         return x0, y0 + n * rh
 
     def projection_symbol(self, pos, size=10.0):
-        """Third-angle projection symbol (JIS B 0001)."""
+        """Third-angle projection symbol (JIS B 0001 / ISO 5456-2)."""
+        # third angle: end view (two circles) on the LEFT of the truncated cone,
+        # whose small end faces it (first angle has them the other way round)
         x, y = pos; s = size
-        self.line([(x, y + s * 0.3), (x + s * 0.9, y), (x + s * 0.9, y + s), (x, y + s * 0.7), (x, y + s * 0.3)], "thin")
-        cx = x + s * 1.6
+        cx = x + s * 0.5
         for r in (s * 0.5, s * 0.25):
             t = np.linspace(0, 2 * math.pi, 40)
             self.line(np.c_[cx + r * np.cos(t), y + s / 2 + r * np.sin(t)], "thin")
-        self.line([(x - 1, y + s / 2), (cx + s * 0.7, y + s / 2)], "center")
+        x1 = x + s * 1.2
+        self.line([(x1, y + s * 0.25), (x1 + s * 0.9, y), (x1 + s * 0.9, y + s), (x1, y + s * 0.75), (x1, y + s * 0.25)], "thin")
+        self.line([(x - s * 0.2, y + s / 2), (x1 + s * 1.1, y + s / 2)], "center")

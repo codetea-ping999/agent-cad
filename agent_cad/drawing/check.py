@@ -2,6 +2,7 @@
 
 - dims:     every dimension measured from the B-rep equals the design intent
 - fits:     toleranced sizes carry the JIS B 0401 deviations of their fit code
+- features: every required feature (holes, taps, sections) was found on the model
 - content:  title block, general tolerance, roughness and projection method present
 - layout:   no two texts overlap and nothing leaves the drawing frame
 """
@@ -33,6 +34,8 @@ def check_sheet(sheet):
             up, lo = jis.fit_deviations(float(m.group(1)), m.group(2))
             ok = abs(float(d["tol"][0]) - up) < 1e-9 and abs(float(d["tol"][1]) - lo) < 1e-9
             add(f"fit.{d['name']}", ok, code=m.group(2), deviations=d["tol"])
+    for f in sheet.meta.get("features", []):
+        add(f"feature.{f['name']}", f["found"] == f["expected"], found=f["found"], expected=f["expected"])
     tb = sheet.meta.get("title_block", {})
     add("content.title_block", all(tb.get(k) for k in REQUIRED_TITLE), missing=[k for k in REQUIRED_TITLE if not tb.get(k)])
     add("content.projection", tb.get("投影法") == "第三角法")

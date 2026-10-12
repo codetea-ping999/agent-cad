@@ -123,3 +123,41 @@ def test_pdf_requires_japanese_font(monkeypatch, tmp_path):
     sh = stem_drawing.faceplate_sheet(p, stem.build(p)[1])
     with pytest.raises(RuntimeError, match="Japanese font"):
         to_pdf(sh, tmp_path / "x.pdf")
+
+
+def test_missing_features_fail_the_check():
+    """Parameters claim M5 taps (φ4.2), the model was drilled φ3.3: the tap pattern is
+    not found, and the sheet must fail instead of silently dropping the callouts."""
+    p = stem.StemParams()
+    b, f = stem.build(stem.StemParams(tap_drill_d=3.3))
+    assert "feature.fp_taps" in {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, b)))}
+
+
+def test_fastener_diameters_are_checked():
+    p = stem.StemParams()
+    b, f = stem.build(stem.StemParams(bolt_clear_d=5.54, cbore_d=8.84))
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.faceplate_sheet(p, f)))}
+    assert {"dim.bolt_clear_d", "dim.cbore_d"} <= bad
+
+
+def test_body_sections_follow_the_loft():
+    p = stem.StemParams()
+    b, f = stem.build(p)
+    dims = {d["name"] for d in stem_drawing.body_sheet(p, b).meta["dims"]}
+    assert {"section_D_w", "section_D_h", "section_E_w", "section_E_h"} <= dims
+    b2, _ = stem.build(stem.StemParams(body_w=23.0))
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, b2)))}
+    assert "dim.section_D_w" in bad
+
+
+def test_projection_symbol_is_third_angle():
+    from agent_cad.drawing.sheet import Sheet
+    import numpy as np
+    sh = Sheet(); sh.projection_symbol((100, 100))
+    lines = [it[1] for it in sh.items if it[0] == "line" and it[2] == "thin"]
+    circles = [l for l in lines if len(l) > 20]
+    cone = [l for l in lines if len(l) == 5][0]
+    assert max(c[:, 0].max() for c in circles) < cone[:, 0].min()      # end view left of the cone
+    left = cone[cone[:, 0] < cone[:, 0].mean()]
+    right = cone[cone[:, 0] > cone[:, 0].mean()]
+    assert np.ptp(left[:, 1]) < np.ptp(right[:, 1])                       # small end faces the circles
