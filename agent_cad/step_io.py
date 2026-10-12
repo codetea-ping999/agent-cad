@@ -39,6 +39,21 @@ class PartSpec:
     density_g_cm3: float = 0.0
 
 
+def definitions(parts):
+    """Group parts into shared definitions: the same B-rep with identical metadata
+    (e.g. repeated fasteners) is one product with several instances. Returns
+    [(PartSpec, [indices])] in first-occurrence order."""
+    out = []
+    for i, ps in enumerate(parts):
+        for d, idx in out:
+            if ps.shape.wrapped.IsSame(d.shape.wrapped) and (ps.name, tuple(ps.color), ps.material, ps.density_g_cm3) == \
+                    (d.name, tuple(d.color), d.material, d.density_g_cm3):
+                idx.append(i); break
+        else:
+            out.append((ps, [i]))
+    return out
+
+
 def mass_props(shape, eps=1e-9):
     """Volume, area, centroid with adaptive integration. The default (fixed
     Gauss order) integration scatters by ~1e-5 on B-spline faces, which would
@@ -69,8 +84,16 @@ def write_step(parts, path, assembly_name=None, author="agent-cad", organization
     if len(parts) > 1 or assembly_name:
         asm = st.NewShape()
         TDataStd_Name.Set_s(asm, TCollection_ExtendedString(assembly_name or DEFAULT_ASSEMBLY))
-    for ps in parts:
-        lab = st.AddShape(ps.shape.wrapped, False)
+    labels = []
+    for defn, idx in definitions(parts):
+        shp = defn.shape.wrapped
+        if any(shp.IsSame(d.shape.wrapped) for d, _ in labels):
+            # same B-rep, different metadata: AddShape would reuse (and overwrite) the label
+            from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
+            shp = BRepBuilderAPI_Copy(shp).Shape()
+        labels.append((defn, idx))
+        ps = defn
+        lab = st.AddShape(shp, False)
         TDataStd_Name.Set_s(lab, TCollection_ExtendedString(ps.name))
         r, g, b = ps.color
         ct.SetColor(lab, Quantity_Color(r, g, b, Quantity_TOC_RGB), XCAFDoc_ColorType.XCAFDoc_ColorSurf)
@@ -84,7 +107,8 @@ def write_step(parts, path, assembly_name=None, author="agent-cad", organization
                                h("density"), h("POSITIVE_RATIO_MEASURE"))
             mt.SetMaterial(lab, m)
         if asm is not None:
-            st.AddComponent(asm, lab, TopLoc_Location())
+            for _ in idx:                     # one component per occurrence of this definition
+                st.AddComponent(asm, lab, TopLoc_Location())
     st.UpdateAssemblies()
     w = STEPCAFControl_Writer()  # constructor initialises the STEP statics; set ours afterwards
     Interface_Static.SetIVal_s("write.step.schema", AP242)
@@ -111,6 +135,7 @@ class ReadPart:
     validation: dict  # props stored in the file (may be empty)
     material: str | None = None
     density_g_cm3: float | None = None
+    n_roots: int = 1  # top-level products in the file (a valid export has exactly one)
 
 
 def read_step(path):
@@ -177,4 +202,6 @@ def read_step(path):
                                       *material(ref)))
         else:
             parts.append(ReadPart(name(top), Shape.cast(st.GetShape_s(top)), color(top), validation(top), *material(top)))
+    for rp in parts:
+        rp.n_roots = free.Length()
     return asm_name, parts

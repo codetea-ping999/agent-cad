@@ -25,7 +25,7 @@ from OCP.TopAbs import TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE
 from OCP.GCPnts import GCPnts_AbscissaPoint
 from OCP.BRepAdaptor import BRepAdaptor_Curve
 from build123d import Shape
-from ..step_io import read_step, write_step, PartSpec, mass_props, DEFAULT_ASSEMBLY
+from ..step_io import read_step, write_step, PartSpec, mass_props, DEFAULT_ASSEMBLY, definitions
 
 # Thresholds. CATIA V5 works at 0.001 mm resolution; geometry tolerances well
 # below its "sharpness"/merging tolerance avoid healing on import.
@@ -44,24 +44,67 @@ def _check(name, ok, **detail):
 
 
 # ---------------------------------------------------------------- 1. text
+SOLID_TYPES = ("MANIFOLD_SOLID_BREP", "BREP_WITH_VOIDS")
+
+
+def _scrub(txt):
+    """Part 21 lexing: drop /* comments */ and blank out 'strings' ('' escapes) in one
+    pass, so neither can fake or hide #references or entity names."""
+    out, i, n = [], 0, len(txt)
+    while i < n:
+        c = txt[i]
+        if c == "'":
+            j = i + 1
+            while j < n:
+                if txt[j] == "'":
+                    if j + 1 < n and txt[j + 1] == "'":
+                        j += 2; continue
+                    break
+                j += 1
+            out.append("''"); i = j + 1
+        elif txt.startswith("/*", i):
+            j = txt.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+        else:
+            out.append(c); i += 1
+    return "".join(out)
+
+
+def _entities(data):
+    """{id: (type, body)} of the DATA section; whitespace and line breaks are not significant."""
+    ents = {}
+    for stmt in data.split(";"):
+        m = re.match(r"\s*#(\d+)\s*=\s*(.*)\Z", stmt, re.S)
+        if m:
+            body = re.sub(r"\s+", "", m.group(2))
+            t = re.match(r"\(?([A-Z_0-9]+)\(", body)
+            ents[m.group(1)] = (t.group(1) if t else "", body)
+    return ents
+
+
 def text_checks(path):
-    txt = open(path, encoding="latin-1").read()
-    head, _, data = txt.partition("DATA;")
+    raw = open(path, encoding="latin-1").read()
+    head, _, data = raw.partition("DATA;")
     out = []
-    m = re.search(r"FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'", head)
+    m = re.search(r"FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'", re.sub(r"/\*.*?\*/", "", head, flags=re.S))
     out.append(_check("header.schema_ap242", m is not None and SCHEMA_AP242 in m.group(1),
                       schema=m.group(1) if m else None))
-    out.append(_check("header.unit_mm", "SI_UNIT(.MILLI.,.METRE.)" in data.replace(" ", "")))
-    data = re.sub(r"'(?:[^']|'')*'", "''", data)  # '#' inside names/descriptions is not a reference
-    data = re.sub(r"/\*.*?\*/", "", data, flags=re.S)  # nor inside comments
-    defined = set(re.findall(r"^#(\d+)\s*=", data, re.M))
-    used = set(re.findall(r"#(\d+)", re.sub(r"^#\d+\s*=", "", data, flags=re.M)))
-    missing = sorted(used - defined, key=int)[:5]
-    out.append(_check("text.refs_resolve", not missing, entities=len(defined), missing=missing))
-    types = Counter(re.findall(r"^#\d+\s*=\s*([A-Z_0-9]+)\s*\(", data, re.M))
-    out.append(_check("text.has_solids", types["MANIFOLD_SOLID_BREP"] > 0,
-                      manifold_solid_brep=types["MANIFOLD_SOLID_BREP"], advanced_face=types["ADVANCED_FACE"],
+    ents = _entities(_scrub(data))
+    # the geometry's length unit (assigned by GLOBAL_UNIT_ASSIGNED_CONTEXT) must be the millimetre;
+    # other length units may legitimately exist, e.g. the cm inside a g/cm3 density unit
+    ctx_units = {r for _, b in ents.values() if "GLOBAL_UNIT_ASSIGNED_CONTEXT(" in b
+                 for r in re.findall(r"#(\d+)", b.split("GLOBAL_UNIT_ASSIGNED_CONTEXT(", 1)[1])}
+    lunits = [ents[r][1] for r in ctx_units if r in ents and "LENGTH_UNIT(" in ents[r][1]]
+    out.append(_check("header.unit_mm", bool(lunits) and all("SI_UNIT(.MILLI.,.METRE.)" in b for b in lunits),
+                      length_units=len(lunits)))
+    used = {r for _, b in ents.values() for r in re.findall(r"#(\d+)", b)}
+    missing = sorted(used - set(ents), key=int)[:5]
+    out.append(_check("text.refs_resolve", not missing, entities=len(ents), missing=missing))
+    types = Counter(t for t, _ in ents.values())
+    nsol = sum(types[t] for t in SOLID_TYPES)
+    out.append(_check("text.has_solids", nsol > 0, solids=nsol, advanced_face=types["ADVANCED_FACE"],
                       products=types["PRODUCT"]))
+    types["_solids"] = nsol
     return out, types
 
 
@@ -126,8 +169,10 @@ def check_step(path, reference, assembly_name=None):
     got, want = sorted(p.name for p in parts), sorted(r.name for r in reference)  # multisets: duplicates count
     results.append(_check("struct.part_names", got == want, read=got, expected=want))
     results.append(_check("struct.assembly_name", asm == assembly_name, read=asm, expected=assembly_name))
-    results.append(_check("text.solid_count", types["MANIFOLD_SOLID_BREP"] == len(reference),
-                          found=types["MANIFOLD_SOLID_BREP"], expected=len(reference)))
+    ndef = len(definitions(reference))      # repeated instances share one solid definition
+    results.append(_check("text.solid_count", types["_solids"] == ndef, found=types["_solids"], expected=ndef))
+    roots = {p.n_roots for p in parts} or {0}
+    results.append(_check("struct.single_root", roots == {1}, roots=sorted(roots)))
     for ref in reference:
         rp = by_name[ref.name].pop(0) if by_name.get(ref.name) else None
         if rp is None:
