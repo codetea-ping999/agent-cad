@@ -17,7 +17,8 @@ def _font():
     for n in _JP_FONTS:
         if n in names:
             return n
-    return "DejaVu Sans"
+    raise RuntimeError("No Japanese font found for drawing PDFs (tried: " + ", ".join(_JP_FONTS) +
+                       "). Install one, e.g. `apt-get install fonts-ipafont-gothic` or `fonts-noto-cjk`.")
 
 
 def to_pdf(sheet, path, dpi=200):

@@ -4,10 +4,10 @@ Every dimension value is measured from the B-rep (agent_cad.drawing.measure)
 and recorded in sheet.meta["dims"] next to the design intent from the
 parameters, so verify_drawing() can catch model/drawing disagreement.
 """
-import math, datetime
+import math, datetime, hashlib, json
 import numpy as np
 from build123d import Vector
-from ..drawing.sheet import Sheet, View, A2
+from ..drawing.sheet import Sheet, View, A2, A3, text_box
 from ..drawing.measure import find_cyl, planes
 from ..standards import jis
 from . import stem
@@ -79,6 +79,13 @@ def _title(sh, p, part_name, dwg_no, mass_g, scale="1:1"):
     sh.meta["roughness_general"] = RA_GENERAL
 
 
+def doc_no(p):
+    """Drawing-number stem unique to a parameter set: variants that differ in any
+    parameter (size, angle, material...) never share a document identifier."""
+    h = hashlib.sha1(json.dumps(stem.asdict(p), sort_keys=True, default=str).encode()).hexdigest()[:6].upper()
+    return f"AC-STEM-{h}"
+
+
 def _common_notes(p, extra):
     _, finish = MATERIAL_SPEC.get(p.material, ("", ""))
     return [f"指示なき寸法許容差は JIS B 0405-{TOL_CLASS}、幾何公差は JIS B 0419-{GEO_CLASS} による。",
@@ -89,7 +96,7 @@ def _common_notes(p, extra):
 
 
 # ======================================================================= body
-def body_sheet(p: stem.StemParams, body, faceplate=None):
+def body_sheet(p: stem.StemParams, body, faceplate=None, dwg_no=None):
     d, n, S, B = stem.frame(p)
     dv, nv = np.array([d.X, d.Y, d.Z]), np.array([n.X, n.Y, n.Z])
     sh = Sheet(); D = _Dims(sh)
@@ -109,6 +116,7 @@ def body_sheet(p: stem.StemParams, body, faceplate=None):
     light = find_cyl(body, dv, r=p.light_d / 2, inner=True)[0]
     pinch = sorted(find_cyl(body, (0, 1, 0), r=p.bolt_clear_d / 2, inner=True), key=lambda c: c.loc[2])
     taps = find_cyl(body, dv, r=p.tap_drill_d / 2, inner=True)
+    cbores = find_cyl(body, (0, 1, 0), r=p.cbore_d / 2, inner=True)
     slot = sorted(y for y, f, _ in planes(body, (0, 1, 0)) if f.center().X < -st_bore.r and abs(f.center().Y) < 5)
     slot_w = slot[-1] - slot[0] if len(slot) >= 2 else float("nan")
 
@@ -124,8 +132,8 @@ def body_sheet(p: stem.StemParams, body, faceplate=None):
         sh.place_third_angle(front, top, left, aux, gap_right=60)
     # sheet furniture first so annotations can avoid it
     mass = body.volume / 1000 * rho
-    _title(sh, p, "ステム 本体 (STEM BODY)", "AC-STEM-001-01", mass)
-    _notes(sh, _common_notes(p, ["※ φ31.8 はフェイスプレートと組み付けた状態で仕上げる (共加工)。",
+    _title(sh, p, "ステム 本体 (STEM BODY)", f"{dwg_no or doc_no(p)}-01", mass)
+    _notes(sh, _common_notes(p, [f"※ φ{_fmt(2 * bar_bore.r)} はフェイスプレートと組み付けた状態で仕上げる (共加工)。",
                                  "ピンチボルト締結トルク 5〜6 N·m、フェイスプレート 4〜5 N·m (参考)。"]), (16, 106))
     _general_tol_table(sh, (16, 36))
     fb, tb, ab = front.bbox(), top.bbox(), aux.bbox()
@@ -180,10 +188,12 @@ def body_sheet(p: stem.StemParams, body, faceplate=None):
         D.rec("pinch_pitch", pz, p.pinch_pitch, _fmt(pz))
         sh.dim(fs((bx, 0, pinch[0].loc[2])), fs((0, 0, pinch[0].loc[2])), -(pinch[0].loc[2] - z0) - 5, _fmt(-bx))
         D.rec("pinch_bolt_x", -bx, p.steerer_d / 2 + p.pinch_wall + p.bolt_clear_d / 2, _fmt(-bx))
+        cb_lo, cb_hi = cbores[0].axial_extent() if cbores else (0.0, 0.0)
+        D.rec("pinch_cbore_depth", cb_hi - cb_lo, p.cbore_depth, _fmt(cb_hi - cb_lo))
         lb = left.bbox()
         sh.leader(fs(pinch[0].loc - (0, 0, pinch[0].r * 0.7)),
                   [lb[0] + (-4, -12), lb[0] + (-4, -22), (lb[0][0] - 4, lb[1][1] + 26)], "", right=True,
-                  lines=[f"2×φ{_fmt(2 * pinch[0].r)} キリ", f"  φ{_fmt(p.cbore_d)} 深ザグリ 深さ{_fmt(p.cbore_depth)} (+Y側)",
+                  lines=[f"2×φ{_fmt(2 * pinch[0].r)} キリ", f"  φ{_fmt(2 * cbores[0].r) if cbores else '-'} 深ザグリ 深さ{_fmt(cb_hi - cb_lo)} (+Y側)",
                          f"  反対側 M5×0.8 深さ{_fmt(math.floor((p.ear_half_w - p.slot_w / 2 - 1) * 2) / 2)} (下穴φ{_fmt(p.tap_drill_d)})"])
     # GD&T on the steerer bore, datum A = steerer bore
     sh.datum(fs((st_bore.r, 0, z0)) + (0, -15), (0, -1), "A", length=5)
@@ -213,8 +223,10 @@ def body_sheet(p: stem.StemParams, body, faceplate=None):
         sh.dim(aux.to_sheet(a_), aux.to_sheet(a_ + nv * hn), (aux.to_sheet(a_)[0] - ab[0][0]) + 8, _fmt(hn))
         D.rec("fp_bolt_pitch_y", wy, 2 * p.fp_bolt_w, _fmt(wy)); D.rec("fp_bolt_pitch_n", hn, 2 * p.fp_bolt_off, _fmt(hn))
         tr = taps[int(np.argmax(q[:, 0] + q[:, 1]))].loc
+        e0, e1 = taps[0].axial_extent()      # opens on the mating face, so the extent is the drill depth
+        D.rec("fp_tap_drill_depth", e1 - e0, p.tap_depth, _fmt(e1 - e0))
         sh.leader(aux.to_sheet(tr) + (1.2, 1.2), [(ab[1][0] + 4, ab[1][1] + 4), (ab[0][0] - 4, ab[1][1] + 4)], "",
-                  lines=[f"4×M5×0.8 深さ{_fmt(p.tap_depth - 2)}", f"  下穴φ{_fmt(p.tap_drill_d)} 深さ{_fmt(p.tap_depth)}"])
+                  lines=[f"4×M5×0.8 深さ{_fmt(e1 - e0 - 2)}", f"  下穴φ{_fmt(2 * taps[0].r)} 深さ{_fmt(e1 - e0)}"])
         w_, h_ = sh.fcf((ab[0][0], ab[0][1] - 26), ["flatness", "0.05"])
         sh.text((ab[0][0], ab[0][1] - 32), "合わせ面 (図示面)", 3, 0, "left", "bottom")
         sh.roughness((ab[0][0] + w_ + 6, ab[0][1] - 26), RA_FACE)
@@ -228,11 +240,58 @@ def body_sheet(p: stem.StemParams, body, faceplate=None):
 
 
 # ======================================================================= faceplate
-def faceplate_sheet(p: stem.StemParams, fp, scale=2.0):
+def _window(fp, Bm, dv, nv, p):
+    """Through window at the faceplate centre, measured on the solid: a line along d
+    misses the faceplate inside the window. Returns (width, height, corner radius) or None."""
+    from build123d import Edge
+    yv = np.array([0.0, 1.0, 0.0])
+
+    def open_at(y, h):
+        c = Bm + yv * y + nv * h
+        return fp.distance_to(Edge.make_line(tuple(c - dv * 100), tuple(c + dv * 100))) > 1e-6
+
+    if not open_at(0, 0):
+        return None
+
+    def edge(u, step=0.5):          # walk out to the first wall along u (y, n), then bisect
+        u = np.array(u, float); lo = 0.0
+        while open_at(*(u * (lo + step))):
+            lo += step
+            if lo > 200:
+                return float("inf")
+        hi = lo + step
+        for _ in range(30):
+            m = (lo + hi) / 2
+            lo, hi = (m, hi) if open_at(*(u * m)) else (lo, m)
+        return lo
+    ww, wh = edge((1, 0)) + edge((-1, 0)), edge((0, 1)) + edge((0, -1))
+    rs = [c.r for c in find_cyl(fp, dv, inner=True)
+          if abs((c.loc - Bm) @ yv) < ww / 2 and abs((c.loc - Bm) @ nv) < wh / 2]
+    return ww, wh, (min(rs) if rs else 0.0)
+
+
+def _fits(sh):
+    from ..drawing.check import check_sheet
+    bad = {c["check"] for c in check_sheet(sh)["checks"] if not c["pass"]}
+    return not bad & {"layout.inside_frame", "layout.text_overlap", "layout.text_on_geometry"}
+
+
+def faceplate_sheet(p: stem.StemParams, fp, scale=2.0, dwg_no=None):
+    """A3 at `scale`; if the layout does not fit, smaller scales, then A2."""
+    tries = [(A3, s) for s in dict.fromkeys((scale, 1.5, 1.0)) if s <= scale] + [(A2, scale), (A2, 1.0)]
+    for size, sc in tries:
+        sh = _faceplate_sheet(p, fp, sc, size, dwg_no)
+        if _fits(sh):
+            return sh
+    return sh
+
+
+def _faceplate_sheet(p, fp, scale, size, dwg_no):
     d, n, S, B = stem.frame(p)
     dv, nv = np.array([d.X, d.Y, d.Z]), np.array([n.X, n.Y, n.Z])
     Bm = np.array([B.X, B.Y, B.Z])
-    sh = Sheet(); D = _Dims(sh)
+    sh = Sheet(size); D = _Dims(sh)
+    kx, ky = size[0] / A3[0], size[1] / A3[1]
     bore = [c for c in find_cyl(fp, (0, 1, 0), inner=True) if c.r > 10][0]
     holes = find_cyl(fp, dv, r=p.bolt_clear_d / 2, inner=True)
     cb = find_cyl(fp, dv, r=p.cbore_d / 2, inner=True)
@@ -248,8 +307,8 @@ def faceplate_sheet(p: stem.StemParams, fp, scale=2.0):
         v0 = View(name, fp, direction, xdir, (0, 0), scale)
         return sh.add_view(View(name, fp, direction, xdir, tuple(np.array(at) - v0.to_sheet(Bm)), scale, **kw))
     # front view = looking at the faceplate from the rider side (along -d); section C-C along the stem plane
-    front = place("F", tuple(-dv), (0, 1, 0), (125, 190))
-    side = place("C-C", (0, 1, 0), tuple(dv), (265, 190), section=(tuple(Bm), (0, 1, 0)))
+    front = place("F", tuple(-dv), (0, 1, 0), (125 * kx, 190 * ky))
+    side = place("C-C", (0, 1, 0), tuple(dv), (265 * kx, 190 * ky), section=(tuple(Bm), (0, 1, 0)))
     fs, ss = front.to_sheet, side.to_sheet
     sh.text(ss(Bm) + (0, scale * hn_all / 2 + 20), "C-C", 5, 0, "center", "bottom")
     sh.section_line(fs(Bm) + (0, scale * hn_all / 2 + 20), fs(Bm) - (0, scale * hn_all / 2 + 20), "C", look=(1, 0))
@@ -260,7 +319,18 @@ def faceplate_sheet(p: stem.StemParams, fp, scale=2.0):
     k = sh.diameter_dim(ss(Bm), scale * bore.r, [-35, 35, -50], t[0] + " ※", tol=t[1], outside=22, below=9)
     sh.fcf(k + (0, -7.5), ["cylindricity", "0.02"])
     D.rec("bar_bore_d", 2 * bore.r, p.bar_d, t[0], t[1])
-    sh.roughness(ss(Bm) + (-4, -scale * bore.r), RA_BORE)
+    # bore roughness: symbol inside the bore when it fits, else on a leader to free space
+    for a_deg, k in ((-90, 0.0), (-120, 1.0), (-60, 1.0), (-150, 1.0), (-30, 1.0)):
+        u = np.array([math.cos(math.radians(a_deg)), math.sin(math.radians(a_deg))])
+        tip = ss(Bm) + u * scale * bore.r
+        pos = tip + (-4, 0) if k == 0 else tip + u * 18 + (-8, 0)
+        if sh.is_free(text_box(pos + (5.4, 7.6), f"Ra {RA_BORE}", 3.5, 0, "left", "bottom")) and \
+                sh.is_free(((pos[0] - 3, pos[1]), (pos[0] + 6, pos[1] + 7))):
+            break
+    if k == 0:
+        sh.roughness(pos, RA_BORE)
+    else:
+        sh.roughness_leader(tip, pos, RA_BORE)
     top_n = max(ext_n)
     sh.dim(ss(Bm + nv * top_n), ss(Bm + nv * top_n + dv * t_front), 8, _fmt(t_front))
     D.rec("front_thickness", t_front, p.fp_front, _fmt(t_front))
@@ -286,16 +356,26 @@ def faceplate_sheet(p: stem.StemParams, fp, scale=2.0):
         D.rec("bolt_pitch_y", wy, 2 * p.fp_bolt_w, _fmt(wy)); D.rec("bolt_pitch_n", hn, 2 * p.fp_bolt_off, _fmt(hn))
         cb_depth = t_front - (cb[0].axial_extent()[0] - Bm @ dv) if cb else 0.0
         D.rec("cbore_depth", cb_depth, 2.5, _fmt(cb_depth))
-        sh.leader(fs(tl) + np.array([-1, 1]) * scale * holes[0].r * 0.7, fs(Bm) + (-75, 62), "", right=True,
+        fb_ = front.bbox()
+        sh.leader(fs(tl) + np.array([-1, 1]) * scale * holes[0].r * 0.7,
+                  [fs(Bm) + (-75, 62), (fb_[0][0] - 10, fb_[1][1] + 10), (fb_[0][0] - 30, fb_[1][1] + 18),
+                   (fb_[0][0] + 10, fb_[1][1] + 22)], "", right=True,
                   lines=[f"4×φ{_fmt(2 * holes[0].r)} キリ", f"φ{_fmt(2 * cb[0].r) if cb else '-'} 深ザグリ 深さ{_fmt(cb_depth)}"])
-    if p.fp_window_w > 0:
-        sh.leader(fs(Bm - np.array([0, p.fp_window_w / 2, 0])), fs(Bm) + (-60, -48), "", right=False,
-                  lines=[f"窓 {_fmt(p.fp_window_w)}×{_fmt(p.fp_window_h)}", f"R{_fmt(min(p.fp_window_w, p.fp_window_h) / 2)} 貫通"])
-        D.rec("window_w", p.fp_window_w, p.fp_window_w, _fmt(p.fp_window_w))
+    win = _window(fp, Bm, dv, nv, p)
+    want_win = p.fp_window_w > 0 and p.fp_window_h > 0     # stem.build() cuts a window only then
+    if win or want_win:
+        ww, wh, wr = win or (0.0, 0.0, 0.0)
+        if win:
+            fb_ = front.bbox()
+            sh.leader(fs(Bm - np.array([0, ww / 2, 0])),
+                      [fs(Bm) + (-60, -48), (fb_[0][0] - 8, fb_[0][1] - 10), (fb_[0][0] - 20, fb_[0][1] - 20)], "", right=False,
+                      lines=[f"窓 {_fmt(ww)}×{_fmt(wh)}", f"R{_fmt(wr)} 貫通"])
+        D.rec("window_w", ww, p.fp_window_w if want_win else 0.0, _fmt(ww))
+        D.rec("window_h", wh, p.fp_window_h if want_win else 0.0, _fmt(wh))
     mass = fp.volume / 1000 * stem.density(p)
-    _title(sh, p, "ステム フェイスプレート (FACEPLATE)", "AC-STEM-001-02", mass, scale=f"{scale:g}:1")
-    _notes(sh, _common_notes(p, ["※ φ31.8 は本体と組み付けた状態で仕上げる (共加工)。",
-                                 "本体との合わせ面のすき間 1.0 (締結前、参考)。"]), (16, 106))
+    _title(sh, p, "ステム フェイスプレート (FACEPLATE)", f"{dwg_no or doc_no(p)}-02", mass, scale=f"{scale:g}:1")
+    _notes(sh, _common_notes(p, [f"※ φ{_fmt(2 * bore.r)} は本体と組み付けた状態で仕上げる (共加工)。",
+                                 f"本体との合わせ面のすき間 {_fmt(2 * t_back)} (締結前、参考)。"]), (16, 106))
     _general_tol_table(sh, (16, 36))
     sh.meta["part"] = "STEM_FACEPLATE"
     return sh

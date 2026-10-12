@@ -107,6 +107,13 @@ def outer(p: StemParams):
             part -= extrude(Plane(origin=o, x_dir=Y, z_dir=d) * RectangleRounded(nw, H, 3), p.boss_back + p.fp_front + 2)
     return part
 
+def _window_profile(p):
+    """Full-round slot fp_window_w (across, Y) x fp_window_h (vertical); end radius = half the smaller size."""
+    w, h = p.fp_window_w, p.fp_window_h
+    if abs(w - h) < 1e-9:
+        return Circle(w / 2)
+    return SlotOverall(max(w, h), min(w, h), rotation=0 if w > h else 90)
+
 def build(p: StemParams):
     d, n, S, B = frame(p)
     Y = Vector(0, 1, 0)
@@ -145,14 +152,14 @@ def build(p: StemParams):
             faceplate -= Plane(origin=fpl.origin - d * 2.51, z_dir=d) * Cylinder(
                 p.cbore_d / 2, 40, align=(Align.CENTER, Align.CENTER, Align.MIN))
             faceplate -= fpl * Cylinder(p.bolt_clear_d / 2, 40, align=(Align.CENTER, Align.CENTER, Align.MIN))
-            # body: tap drill
+            # body: tap drill, tap_depth deep from the mating face (the cutter starts in the gap)
             bpl = Plane(origin=bar_pl.from_local_coords((0, loc.Y, loc.Z)), z_dir=-d)
-            body_part -= bpl * Cylinder(p.tap_drill_d / 2, p.tap_depth, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            body_part -= bpl * Cylinder(p.tap_drill_d / 2, p.tap_depth + p.fp_gap / 2,
+                                        align=(Align.CENTER, Align.CENTER, Align.MIN))
     if p.fp_window_w > 0 and p.fp_window_h > 0:
         # centre window through the faceplate, machined from the front
         win = Plane(origin=B, x_dir=Vector(0, 1, 0), z_dir=d)
-        r = min(p.fp_window_w, p.fp_window_h) / 2 - 0.01
-        faceplate -= extrude(win * RectangleRounded(p.fp_window_w, p.fp_window_h, r), 60)
+        faceplate -= extrude(win * _window_profile(p), 60)
     return body_part, faceplate
 
 def cfd_solid(p: StemParams, bar_len=160.0, steer_below=30.0, steer_above=3.0, head_h=5.0):
@@ -164,8 +171,7 @@ def cfd_solid(p: StemParams, bar_len=160.0, steer_below=30.0, steer_above=3.0, h
     part = outer(p)
     if p.fp_window_w > 0 and p.fp_window_h > 0:
         win = Plane(origin=B, x_dir=Y, z_dir=d)
-        r = min(p.fp_window_w, p.fp_window_h) / 2 - 0.01
-        part -= extrude(win * RectangleRounded(p.fp_window_w, p.fp_window_h, r), 60)
+        part -= extrude(win * _window_profile(p), 60)
     protr = head_h - 2.5   # faceplate counterbore depth is 2.5
     if protr > 0:
         for sv in (-1, 1):

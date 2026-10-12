@@ -217,7 +217,10 @@ class Sheet:
 
     # ---- annotation helpers
     def arrow(self, tip, direction, length=3.0, width=1.0):
-        d = np.asarray(direction, float); d /= np.linalg.norm(d)
+        d = np.asarray(direction, float); nd = np.linalg.norm(d)
+        if not nd > 1e-12:
+            raise ValueError("arrow direction has zero length")
+        d = d / nd
         n = np.array([-d[1], d[0]])
         tip = np.asarray(tip, float)
         self.fill([tip, tip - d * length + n * width / 2, tip - d * length - n * width / 2])
@@ -310,6 +313,11 @@ class Sheet:
 
     def angle_dim(self, vertex, a1_deg, a2_deg, radius, text):
         c = np.asarray(vertex, float)
+        if abs(a2_deg - a1_deg) < 1e-6:
+            # zero angle: no arc to draw, the value sits at the end of the reference line
+            self.text(c + (radius + 1.5) * np.array([math.cos(math.radians(a1_deg)), math.sin(math.radians(a1_deg))]),
+                      text, 3.5, 0, "left", "center")
+            return
         ts = np.radians(np.linspace(a1_deg, a2_deg, 30))
         pts = c + radius * np.c_[np.cos(ts), np.sin(ts)]
         self.line(pts, "thin")
