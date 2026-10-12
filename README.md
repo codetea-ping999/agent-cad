@@ -10,6 +10,8 @@
 - `agent_cad/fea/` 線形静解析（gmsh + scikit-fem, P2四面体）
 - `agent_cad/step_io.py` STEP AP242 入出力（製品構成・部品名・色・材質/密度・幾何検証プロパティ付き）
 - `agent_cad/verify/step_check.py` STEP受け渡しの自己完結チェック（下記）
+- `agent_cad/verify/stem_verify.py` 設計検証ループ（肉厚・干渉・ねじ掛かり・質量・強度、下記）
+- `agent_cad/materials.py` 強度計算用の材料特性
 - `agent_cad/drawing/` JIS図面（第三角法、断面・矢視、寸法・はめあい・幾何公差・表面粗さ、表題欄）をPDF/DXFで出力
 - `agent_cad/standards/jis.py` JIS B 0405 普通公差、JIS B 0401 はめあい表
 - `agent_cad/parts/stem_drawing.py` ステム本体・フェイスプレートの図面定義
@@ -21,6 +23,8 @@
 ```sh
 pip install -r requirements.txt
 python -m scripts.make_stem          # STEP / レポート / 画像を out/ に出力
+python -m scripts.verify_stem        # 設計検証ループ（不合格なら終了コード1）
+python -m scripts.verify_stem --set length=120 --set material=A7075-T6 --json out/v.json
 ```
 
 ## STEP受け渡しチェック（CATIA読込テストの代替）
@@ -64,3 +68,19 @@ python -m pytest -q tests   # 正常ファイルの合格と、面欠落・検�
 - 表題欄・投影法・普通公差・一括粗さの記載があり、クランプ穴と合わせ面に個別の粗さ記号があること
 - 必要な形状（穴・ねじ・ザグリ・断面）がモデルにあり、ボルト穴とザグリが4隅の位置にあること
 - 文字どうし、および文字と外形線が重ならず、文字が枠内に収まること
+
+## 設計検証ループ
+
+`verify(StemParams(...))` はパラメータからモデルを作り直し、全ルールを判定する。各ルールは測定値・限界値・根拠を持つので、不合格のときに何を変えればよいかがわかる。
+
+| ルール | 判定 | 根拠 |
+|---|---|---|
+| geometry | 本体・フェイスプレートがそれぞれ1個の有効ソリッド、相手部品との干渉0 | B-repチェック |
+| wall | 最小肉厚 ≥ 1.5 mm | B-repで面の内向き法線方向にレイを飛ばして実測 |
+| thread | 有効ねじ深さ ≥ 1.5d（M5で7.5 mm） | 図面のねじ深さと同じ値（止まり穴は下穴深さ−2 mm） |
+| mass | 質量 ≤ `mass_target_g` | パラメータ |
+| strength | von Mises（99.9パーセンタイル） ≤ 耐力/1.2（静的）、疲労強度/1.5（疲労） | 線形FEA（gmsh P2四面体 + scikit-fem）、コラム穴固定・ハンドル穴に荷重 |
+
+- 荷重ケース（前方曲げ静的1600 N、横曲げ静的1000 N、前方曲げ疲労450 N）は ISO 4210-5 のステム試験を想定した**暫定値**。規格本文の荷重・腕長さ・回数を入れるまでレポートに provisional と出る
+- 材料特性は便覧の代表値。量産前にJIS H 4140の規格最小値かミルシートの値に置き換える
+- メッシュ寸法 h=2 mm（既定）と h=4 mm で前方曲げ応力の差は約4%（103 / 108 MPa）
