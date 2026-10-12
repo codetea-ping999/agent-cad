@@ -233,3 +233,19 @@ def test_unreadable_file_gives_a_failed_report(tmp_path):
     path = tmp_path / "junk.step"; path.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\n", encoding="latin-1")
     rep = check_step(str(path), [PartSpec("P", Box(1, 1, 1))])
     assert not rep["pass"] and "struct.import" in failed(rep)
+
+
+def test_mesh_volume_far_from_the_origin():
+    from build123d import Box, Pos
+    from agent_cad.verify.step_check import _mesh_volume
+    far = Pos(1e7, -1e7, 1e7) * Box(10, 20, 30)
+    assert abs(_mesh_volume(far) - 6000.0) < 1e-6 * 6000.0
+
+
+def test_empty_shape_has_no_bounds():
+    from build123d import Compound
+    from OCP.TopoDS import TopoDS_Compound
+    from OCP.BRep import BRep_Builder
+    from agent_cad.verify.step_check import _bbox
+    empty = TopoDS_Compound(); BRep_Builder().MakeCompound(empty)   # what a damaged component imports as
+    assert _bbox(Compound(empty)) is None
