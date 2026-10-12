@@ -72,6 +72,8 @@ def _mass(shape):
 
 def _mesh_volume(shape, tol=0.02):
     v, t = shape.tessellate(tol, 0.1)
+    if not v or not t:
+        return None
     V = np.array([(p.X, p.Y, p.Z) for p in v]); T = np.array(t)
     a, b, c = V[T[:, 0]], V[T[:, 1]], V[T[:, 2]]
     return float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6.0)
@@ -114,14 +116,16 @@ def check_step(path, reference, assembly_name=None):
     the expected assembly product, None when the file must hold bare parts."""
     results, types = text_checks(path)
     asm, parts = read_step(path)
-    by_name = {p.name: p for p in parts}
+    by_name = {}
+    for p in parts:                       # every instance kept: duplicates are paired in file order
+        by_name.setdefault(p.name, []).append(p)
     got, want = sorted(p.name for p in parts), sorted(r.name for r in reference)  # multisets: duplicates count
     results.append(_check("struct.part_names", got == want, read=got, expected=want))
     results.append(_check("struct.assembly_name", asm == assembly_name, read=asm, expected=assembly_name))
     results.append(_check("text.solid_count", types["MANIFOLD_SOLID_BREP"] == len(reference),
                           found=types["MANIFOLD_SOLID_BREP"], expected=len(reference)))
     for ref in reference:
-        rp = by_name.get(ref.name)
+        rp = by_name[ref.name].pop(0) if by_name.get(ref.name) else None
         if rp is None:
             continue
         s, n = rp.shape, ref.name
@@ -153,17 +157,24 @@ def check_step(path, reference, assembly_name=None):
         else:
             results.append(_check(f"{n}.geom.vs_validation_props", False, missing=lacking))
         mv = _mesh_volume(s)
-        results.append(_check(f"{n}.mesh.volume", abs(mv - v) <= MESH_REL_TOL * v,
-                              mesh_volume_mm3=round(mv, 1), rel_err=round((mv - v) / v, 6)))
+        if v > 0 and mv is not None:
+            results.append(_check(f"{n}.mesh.volume", abs(mv - v) <= MESH_REL_TOL * v,
+                                  mesh_volume_mm3=round(mv, 1), rel_err=round((mv - v) / v, 6)))
+        else:
+            results.append(_check(f"{n}.mesh.volume", False, volume_mm3=v, note="no volume or no triangles"))
         tmax, emin = _tol_stats(s.wrapped)
         results.append(_check(f"{n}.tol.max_tolerance", tmax <= MAX_GEOM_TOL_MM, max_tol_mm=tmax))
         results.append(_check(f"{n}.tol.min_edge", emin >= MIN_EDGE_MM, min_edge_mm=round(emin, 5)))
     # 7. rewrite the re-read model and read it again
     with tempfile.TemporaryDirectory() as td:
         p2 = os.path.join(td, "rt.step")
-        write_step([PartSpec(rp.name, rp.shape, rp.color or (0.5, 0.5, 0.5), rp.material or "", rp.density_g_cm3 or 0.0)
-                    for rp in parts], p2, asm)
-        asm2, parts2 = read_step(p2)
+        try:
+            write_step([PartSpec(rp.name, rp.shape, rp.color or (0.5, 0.5, 0.5), rp.material or "", rp.density_g_cm3 or 0.0)
+                        for rp in parts], p2, asm)
+            asm2, parts2 = read_step(p2)
+        except IOError as ex:
+            results.append(_check("rewrite.stable", False, error=str(ex)))
+            return {"file": os.path.basename(path), "pass": False, "checks": results}
         # pair parts in file order so duplicate names are compared too
         m1 = [(p.name, p.material, _mass(p.shape)) for p in parts]
         m2 = [(p.name, p.material, _mass(p.shape)) for p in parts2]

@@ -103,3 +103,38 @@ def test_hash_inside_string_is_not_a_reference(tmp_path):
     write_step(part, str(path))
     rep = check_step(str(path), part, None)
     assert rep["pass"], failed(rep)
+
+
+def test_material_without_density_round_trips(tmp_path):
+    from build123d import Box
+    path = tmp_path / "nodens.step"
+    part = [PartSpec("BLOCK", Box(10, 10, 10), material="UNKNOWN-ALLOY")]
+    write_step(part, str(path))
+    _, rp = read_step(str(path))
+    assert rp[0].material == "UNKNOWN-ALLOY"
+    rep = check_step(str(path), part, None)
+    assert rep["pass"], failed(rep)
+
+
+def test_duplicate_instances_are_each_validated(tmp_path):
+    from build123d import Box, Pos
+    a = Box(10, 10, 10)
+    path = tmp_path / "dups.step"
+    # the first of two identical instances is displaced; the last one is intact
+    write_step([PartSpec("BOLT", Pos(0, 7, 0) * a), PartSpec("BOLT", a)], str(path), "ASM")
+    f = failed(check_step(str(path), [PartSpec("BOLT", a), PartSpec("BOLT", a)], "ASM"))
+    assert "BOLT.geom.vs_reference" in f
+
+
+def test_header_keeps_only_the_file_name(tmp_path):
+    from build123d import Box
+    path = tmp_path / "dir\\part.step"            # a Windows-style separator in the name
+    write_step([PartSpec("P", Box(5, 5, 5))], str(path))
+    head = path.read_text(encoding="latin-1").split("ENDSEC;")[0]
+    assert "FILE_NAME('part.step'" in head.replace(" ", "")
+
+
+def test_empty_tessellation_does_not_crash():
+    from build123d import Compound
+    from agent_cad.verify.step_check import _mesh_volume
+    assert _mesh_volume(Compound([])) is None
