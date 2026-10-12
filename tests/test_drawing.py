@@ -495,3 +495,24 @@ def test_holes_run_where_the_drawing_says(monkeypatch):
             c.r + 0.01, 1.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
     bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, b)))}
     assert "dim.fp_tap_on_mating_face" in bad
+
+
+def test_lightening_bore_runs_the_whole_body_and_is_not_a_tap(monkeypatch):
+    """A lightening bore that stops short of the bar bore is reported; one of the tap
+    drill size is not counted as a faceplate tap; a bar bore is measured against its
+    clamp even where the pinch ears are wider."""
+    import dataclasses
+    p = CASES[0]
+    b = stem.build(p)[0]
+    good = {d["name"]: d for d in stem_drawing.body_sheet(p, b).meta["dims"]}
+    assert good["light_to_steerer_bore"]["measured"] < 1e-3 and good["light_to_bar_bore"]["measured"] < 1e-3
+    for q in (dataclasses.replace(p, light_d=p.tap_drill_d), dataclasses.replace(p, ear_half_w=p.bar_clamp_w / 2 + 2)):
+        bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(q, stem.build(q)[0])))}
+        assert not bad, (q, bad)
+    ext = stem.extrude
+
+    def short_bore(obj, amount=None, *a, **kw):      # the bore cutter (p.length long) 20 mm short
+        return ext(obj, amount - 20 if amount == p.length else amount, *a, **kw)
+    monkeypatch.setattr(stem, "extrude", short_bore)
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, stem.build(p)[0])))}
+    assert "dim.light_to_bar_bore" in bad and "dim.light_d" not in bad
