@@ -4,7 +4,8 @@ Checks run on a written STEP file, against the in-memory reference parts:
 
 1. text    – independent of OpenCascade: header (schema AP242, mm units),
              every #ref resolves, entity counts per product.
-2. struct  – product tree, part names and colours survive the round trip.
+2. struct  – product tree, part names, colours, material and density
+             survive the round trip.
 3. topo    – each part reads back as one valid, closed solid (no free edges).
 4. geom    – volume / area / centroid match the reference and the
              geometric validation properties embedded in the file.
@@ -33,6 +34,7 @@ CENTROID_TOL_MM = 1e-3
 MESH_REL_TOL = 5e-3       # triangulation volume vs exact volume
 MAX_GEOM_TOL_MM = 1e-2    # largest vertex/edge tolerance allowed
 MIN_EDGE_MM = 1e-2        # shortest edge allowed (>> CATIA 0.001 mm resolution)
+DENSITY_REL_TOL = 1e-6
 
 SCHEMA_AP242 = "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING"
 
@@ -46,9 +48,11 @@ def text_checks(path):
     txt = open(path, encoding="latin-1").read()
     head, _, data = txt.partition("DATA;")
     out = []
-    out.append(_check("header.schema_ap242", SCHEMA_AP242 in head,
-                      schema=re.search(r"FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'", head).group(1)))
+    m = re.search(r"FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'", head)
+    out.append(_check("header.schema_ap242", m is not None and SCHEMA_AP242 in m.group(1),
+                      schema=m.group(1) if m else None))
     out.append(_check("header.unit_mm", "SI_UNIT(.MILLI.,.METRE.)" in data.replace(" ", "")))
+    data = re.sub(r"'(?:[^']|'')*'", "''", data)  # '#' inside names/descriptions is not a reference
     defined = set(re.findall(r"^#(\d+)\s*=", data, re.M))
     used = set(re.findall(r"#(\d+)", re.sub(r"^#\d+\s*=", "", data, flags=re.M)))
     missing = sorted(used - defined, key=int)[:5]
@@ -106,14 +110,14 @@ def _close(a, b, rel=REL_TOL):
 
 # ---------------------------------------------------------------- main
 def check_step(path, reference, assembly_name=None):
-    """reference: list[PartSpec] that were written to `path`."""
+    """reference: list[PartSpec] that were written to `path`; assembly_name:
+    the expected assembly product, None when the file must hold bare parts."""
     results, types = text_checks(path)
     asm, parts = read_step(path)
     by_name = {p.name: p for p in parts}
-    want = [r.name for r in reference]
-    results.append(_check("struct.part_names", sorted(by_name) == sorted(want), read=sorted(by_name), expected=sorted(want)))
-    if assembly_name:
-        results.append(_check("struct.assembly_name", asm == assembly_name, read=asm))
+    got, want = sorted(p.name for p in parts), sorted(r.name for r in reference)  # multisets: duplicates count
+    results.append(_check("struct.part_names", got == want, read=got, expected=want))
+    results.append(_check("struct.assembly_name", asm == assembly_name, read=asm, expected=assembly_name))
     results.append(_check("text.solid_count", types["MANIFOLD_SOLID_BREP"] == len(reference),
                           found=types["MANIFOLD_SOLID_BREP"], expected=len(reference)))
     for ref in reference:
@@ -123,6 +127,13 @@ def check_step(path, reference, assembly_name=None):
         s, n = rp.shape, ref.name
         col_ok = rp.color is not None and all(abs(a - b) < 2e-3 for a, b in zip(rp.color, ref.color))
         results.append(_check(f"{n}.color", col_ok, read=rp.color))
+        if ref.material:
+            mat_ok = rp.material == ref.material and rp.density_g_cm3 is not None and \
+                _close(rp.density_g_cm3, ref.density_g_cm3, DENSITY_REL_TOL)
+        else:
+            mat_ok = rp.material is None
+        results.append(_check(f"{n}.material", mat_ok, read=rp.material, density_g_cm3=rp.density_g_cm3,
+                              expected=ref.material or None, expected_density_g_cm3=ref.density_g_cm3 or None))
         results.append(_check(f"{n}.topo.valid", BRepCheck_Analyzer(s.wrapped).IsValid()))
         results.append(_check(f"{n}.topo.one_solid", len(s.solids()) == 1, solids=len(s.solids())))
         fe = _free_edges(s.wrapped)
@@ -133,13 +144,14 @@ def check_step(path, reference, assembly_name=None):
                               volume_mm3=round(v, 3), ref_volume_mm3=round(v0, 3),
                               area_mm2=round(a, 3), ref_area_mm2=round(a0, 3), centroid_shift_mm=round(dc, 6)))
         vp = rp.validation
-        if vp:
-            dcv = math.dist(c, vp["centroid"]) if "centroid" in vp else 0.0
-            ok = _close(v, vp.get("volume", v)) and _close(a, vp.get("area", a)) and dcv < CENTROID_TOL_MM
-            results.append(_check(f"{n}.geom.vs_validation_props", ok, file_volume=vp.get("volume"),
-                                  file_area=vp.get("area"), centroid_shift_mm=round(dcv, 6)))
+        lacking = [k for k in ("volume", "area", "centroid") if k not in vp]
+        if not lacking:
+            dcv = math.dist(c, vp["centroid"])
+            ok = _close(v, vp["volume"]) and _close(a, vp["area"]) and dcv < CENTROID_TOL_MM
+            results.append(_check(f"{n}.geom.vs_validation_props", ok, file_volume=vp["volume"],
+                                  file_area=vp["area"], centroid_shift_mm=round(dcv, 6)))
         else:
-            results.append(_check(f"{n}.geom.vs_validation_props", False, note="no validation properties in file"))
+            results.append(_check(f"{n}.geom.vs_validation_props", False, missing=lacking))
         mv = _mesh_volume(s)
         results.append(_check(f"{n}.mesh.volume", abs(mv - v) <= MESH_REL_TOL * v,
                               mesh_volume_mm3=round(mv, 1), rel_err=round((mv - v) / v, 6)))
@@ -149,11 +161,15 @@ def check_step(path, reference, assembly_name=None):
     # 7. rewrite the re-read model and read it again
     with tempfile.TemporaryDirectory() as td:
         p2 = os.path.join(td, "rt.step")
-        write_step([PartSpec(rp.name, rp.shape, rp.color or (0.5, 0.5, 0.5)) for rp in parts], p2, asm)
-        _, parts2 = read_step(p2)
-        m1 = {p.name: _mass(p.shape) for p in parts}
-        m2 = {p.name: _mass(p.shape) for p in parts2}
-        ok = m1.keys() == m2.keys() and all(_close(m1[k][0], m2[k][0], 1e-7) and _close(m1[k][1], m2[k][1], 1e-7) for k in m1)
+        write_step([PartSpec(rp.name, rp.shape, rp.color or (0.5, 0.5, 0.5), rp.material or "", rp.density_g_cm3 or 0.0)
+                    for rp in parts], p2, asm)
+        asm2, parts2 = read_step(p2)
+        # pair parts in file order so duplicate names are compared too
+        m1 = [(p.name, p.material, _mass(p.shape)) for p in parts]
+        m2 = [(p.name, p.material, _mass(p.shape)) for p in parts2]
+        ok = asm2 == asm and len(m1) == len(m2) and all(
+            n1 == n2 and mat1 == mat2 and _close(a[0], b[0], 1e-7) and _close(a[1], b[1], 1e-7) and math.dist(a[2], b[2]) < 1e-6
+            for (n1, mat1, a), (n2, mat2, b) in zip(m1, m2))
         results.append(_check("rewrite.stable", ok))
     return {"file": os.path.basename(path), "pass": all(r["pass"] for r in results), "checks": results}
 
