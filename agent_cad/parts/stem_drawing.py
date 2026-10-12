@@ -169,6 +169,9 @@ def _body_sheet(p, body, dwg_no, size, k):
                              dict(steerer_bore=st_bore is not None, steerer_clamp=st_out is not None,
                                   bar_bore=bar_bore is not None))
     Bm = bar_bore.loc - (bar_bore.loc @ np.array([0, 1, 0])) * np.array([0, 1, 0])
+    # the views put the steerer clamp on the Z axis and draw the bore concentric with it
+    D.rec("steerer_clamp_axis_offset", math.hypot(*st_out.loc[:2]), 0.0, "")
+    D.rec("steerer_bore_axis_offset", math.hypot(*(st_bore.loc[:2] - st_out.loc[:2])), 0.0, "")
     z0, z1 = st_out.axial_extent()       # the clamp cylinder itself: pinch bosses may stand proud of it
     Sm = np.array([0, 0, (z0 + z1) / 2])
     L = np.linalg.norm(Bm - Sm); ang = math.degrees(math.atan2(Bm[2] - Sm[2], Bm[0] - Sm[0]))
@@ -271,6 +274,14 @@ def _body_sheet(p, body, dwg_no, size, k):
         D.rec("pinch_pitch", pz, p.pinch_pitch, _fmt(pz))
         sh.dim(fs((bx, 0, pinch[0].loc[2])), fs((0, 0, pinch[0].loc[2])), -k * (pinch[0].loc[2] - z0) - 5, _fmt(-bx))
         D.rec("pinch_bolt_x", -bx, p.steerer_d / 2 + p.pinch_wall + p.bolt_clear_d / 2, _fmt(-bx))
+        # the 2x callout covers both holes: each axis at the drawn (x, z), cbore and tap on it
+        D.each("pinch_hole_x", [-c.loc[0] for c in pinch], p.steerer_d / 2 + p.pinch_wall + p.bolt_clear_d / 2, _fmt)
+        D.rec("pinch_center_z", (pinch[0].loc[2] + pinch[1].loc[2]) / 2 - (z0 + z1) / 2, 0.0, "")
+
+        def xz_off(c, others):
+            return min((math.hypot(c.loc[0] - o.loc[0], c.loc[2] - o.loc[2]) for o in others), default=float("inf"))
+        D.each("pinch_cbore_coaxial", [xz_off(c, cbores) for c in pinch], 0.0, lambda v: "")
+        D.each("pinch_tap_coaxial", [xz_off(c, ptaps) for c in pinch], 0.0, lambda v: "")
         cb_lo, cb_hi = cbores[0].axial_extent() if cbores else (0.0, 0.0)
         # every hole the 2x callouts cover, not just the first
         D.each("pinch_cbore_depth", [np.subtract(*c.axial_extent()[::-1]) for c in cbores] or [0.0], p.cbore_depth, _fmt)
@@ -279,11 +290,13 @@ def _body_sheet(p, body, dwg_no, size, k):
         pt_lo, pt_hi = ptaps[0].axial_extent() if ptaps else (0.0, 0.0)
         D.each("pinch_tap_drill_d", [2 * c.r for c in ptaps], p.tap_drill_d, lambda v: f"φ{_fmt(v)}")
         D.each("pinch_tap_length", [np.subtract(*c.axial_extent()[::-1]) for c in ptaps], p.ear_half_w - p.slot_w / 2, _fmt)
+        pthr = stem.usable_thread(pt_hi - pt_lo, through=True)
+        D.rec("pinch_thread_depth", pthr, stem.thread_depths(p)["pinch"], _fmt(pthr))
         lb = left.bbox()
         sh.leader(fs(pinch[0].loc - (0, 0, pinch[0].r * 0.7)),
                   [lb[0] + (-4, -12), lb[0] + (-4, -22), (lb[0][0] - 4, lb[1][1] + 26)], "", right=True,
                   lines=[f"2×φ{_fmt(2 * pinch[0].r)} キリ", f"  φ{_fmt(2 * cbores[0].r) if cbores else '-'} 深ザグリ 深さ{_fmt(cb_hi - cb_lo)} (+Y側)",
-                         f"  反対側 M5×0.8 深さ{_fmt(math.floor((pt_hi - pt_lo - 1) * 2) / 2)} (下穴φ{_fmt(2 * ptaps[0].r) if ptaps else '-'})"])
+                         f"  反対側 M5×0.8 深さ{_fmt(pthr)} (下穴φ{_fmt(2 * ptaps[0].r) if ptaps else '-'})"])
     # GD&T on the steerer bore, datum A = steerer bore
     sh.datum(fs((st_bore.r, 0, z0)) + (0, -15), (0, -1), "A", length=5)
     w_fcf = 6.5 + text_width("0.02", 3.5) + 3       # keep the frame clear of the datum A square
@@ -315,11 +328,13 @@ def _body_sheet(p, body, dwg_no, size, k):
         sh.dim(aux.to_sheet(a_), aux.to_sheet(a_ + nv * hn), (aux.to_sheet(a_)[0] - ab[0][0]) + 8, _fmt(hn))
         D.rec("fp_bolt_pitch_y", wy, 2 * p.fp_bolt_w, _fmt(wy)); D.rec("fp_bolt_pitch_n", hn, 2 * p.fp_bolt_off, _fmt(hn))
         tr = taps[int(np.argmax(q[:, 0] + q[:, 1]))].loc
+        fthr = stem.usable_thread(min(np.subtract(*c.axial_extent()[::-1]) for c in taps), through=False)
+        D.rec("fp_thread_depth", fthr, stem.thread_depths(p)["faceplate"], _fmt(fthr))
         e0, e1 = taps[0].axial_extent()      # opens on the mating face, so the extent is the drill depth
         D.each("fp_tap_drill_depth", [np.subtract(*c.axial_extent()[::-1]) for c in taps], p.tap_depth, _fmt)
         D.each("fp_tap_drill_d", [2 * c.r for c in taps], p.tap_drill_d, lambda v: f"φ{_fmt(v)}")
         sh.leader(aux.to_sheet(tr) + (1.2, 1.2), [(ab[1][0] + 4, ab[1][1] + 4), (ab[0][0] - 4, ab[1][1] + 4)], "",
-                  lines=[f"4×M5×0.8 深さ{_fmt(e1 - e0 - 2)}", f"  下穴φ{_fmt(2 * taps[0].r)} 深さ{_fmt(e1 - e0)}"])
+                  lines=[f"4×M5×0.8 深さ{_fmt(fthr)}", f"  下穴φ{_fmt(2 * taps[0].r)} 深さ{_fmt(e1 - e0)}"])
         w_, h_ = sh.fcf((ab[0][0], ab[0][1] - 26), ["flatness", "0.05"])
         sh.text((ab[0][0], ab[0][1] - 32), "合わせ面 (図示面)", 3, 0, "left", "bottom")
         sh.roughness((ab[0][0] + w_ + 6, ab[0][1] - 26), RA_FACE)
@@ -446,7 +461,8 @@ def _boxes_hit(a, b):
 # ======================================================================= faceplate
 def _window(fp, Bm, dv, nv, p):
     """Through window at the faceplate centre, measured on the solid: a line along d
-    misses the faceplate inside the window. Returns (width, height, corner radius) or None."""
+    misses the faceplate inside the window. Returns (width, height, corner radius,
+    centre offset across Y, centre offset along n) or None."""
     from build123d import Edge
     yv = np.array([0.0, 1.0, 0.0])
 
@@ -457,21 +473,30 @@ def _window(fp, Bm, dv, nv, p):
     if not open_at(0, 0):
         return None
 
-    def edge(u, step=0.5):          # walk out to the first wall along u (y, n), then bisect
-        u = np.array(u, float); lo = 0.0
-        while open_at(*(u * (lo + step))):
+    def edge(u, at=(0.0, 0.0), step=0.5):    # walk from `at` to the first wall along u (y, n), then bisect
+        u, at = np.array(u, float), np.array(at, float); lo = 0.0
+        while open_at(*(at + u * (lo + step))):
             lo += step
             if lo > 200:
                 return float("inf")
         hi = lo + step
         for _ in range(30):
             m = (lo + hi) / 2
-            lo, hi = (m, hi) if open_at(*(u * m)) else (lo, m)
+            lo, hi = (m, hi) if open_at(*(at + u * m)) else (lo, m)
         return lo
-    ww, wh = edge((1, 0)) + edge((-1, 0)), edge((0, 1)) + edge((0, -1))
+
+    def span(axis, at):             # (+, -) extents along axis 0 (y) or 1 (n) through `at`
+        u = np.eye(2)[axis]
+        return edge(u, at), edge(-u, at)
+    # each size is measured through the centre found on the other axis, so an off-centre
+    # window is not read short at its rounded ends
+    yp, ym = span(0, (0.0, 0.0)); cy = (yp - ym) / 2
+    np_, nm = span(1, (cy, 0.0)); cn = (np_ - nm) / 2
+    yp, ym = span(0, (0.0, cn)); cy = (yp - ym) / 2
+    ww, wh = yp + ym, np_ + nm       # cy, cn: window centre relative to the bar axis
     rs = [c.r for c in find_cyl(fp, dv, inner=True)
-          if abs((c.loc - Bm) @ yv) < ww / 2 and abs((c.loc - Bm) @ nv) < wh / 2]
-    return ww, wh, (min(rs) if rs else 0.0)
+          if abs((c.loc - Bm) @ yv - cy) < ww / 2 and abs((c.loc - Bm) @ nv - cn) < wh / 2]
+    return ww, wh, (min(rs) if rs else 0.0), cy, cn
 
 
 def _fits(sh):
@@ -596,7 +621,7 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     win = _window(fp, Bm, dv, nv, p)
     want_win = p.fp_window_w > 0 and p.fp_window_h > 0     # stem.build() cuts a window only then
     if win or want_win:
-        ww, wh, wr = win or (0.0, 0.0, 0.0)
+        ww, wh, wr, wcy, wcn = win or (0.0, 0.0, 0.0, 0.0, 0.0)
         if win:
             fb_ = front.bbox()
             sh.leader(fs(Bm - np.array([0, ww / 2, 0])),
@@ -606,6 +631,8 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
         D.rec("window_h", wh, p.fp_window_h if want_win else 0.0, _fmt(wh))
         # full-round slot: the end radius is half the smaller size (stem._window_profile)
         D.rec("window_r", wr, min(p.fp_window_w, p.fp_window_h) / 2 if want_win else 0.0, _fmt(wr))
+        # the drawing shows the window centred on the bar axis: equal +/- extents
+        D.rec("window_center_y", wcy, 0.0, ""); D.rec("window_center_n", wcn, 0.0, "")
     mass = fp.volume / 1000 * stem.density(p)
     _title(sh, p, "ステム フェイスプレート (FACEPLATE)", f"{dwg_no or doc_no(p)}-02", mass, scale=_scale_text(scale))
     _notes(sh, _common_notes(sh, p, [f"※ φ{_fmt(2 * bore.r)} は本体と組み付けた状態で仕上げる (共加工)。",
