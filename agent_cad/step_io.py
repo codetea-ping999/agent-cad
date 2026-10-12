@@ -4,6 +4,7 @@ geometric validation properties (volume / area / centroid), plus reader helpers.
 Validation properties let a receiving CAD (e.g. CATIA) confirm on import that
 the geometry it rebuilt matches what was sent.
 """
+import re
 from dataclasses import dataclass
 from OCP.TDocStd import TDocStd_Document
 from OCP.TCollection import TCollection_ExtendedString, TCollection_HAsciiString, TCollection_AsciiString
@@ -88,10 +89,11 @@ def write_step(parts, path, assembly_name=None, author="agent-cad", organization
     Interface_Static.SetIVal_s("write.step.schema", AP242)
     Interface_Static.SetCVal_s("write.step.unit", "MM")
     w.SetNameMode(True); w.SetColorMode(True); w.SetPropsMode(True); w.SetMaterialMode(True)
-    w.Transfer(doc, STEPControl_AsIs)
+    if not w.Transfer(doc, STEPControl_AsIs):
+        raise IOError(f"STEP transfer failed (nothing written): {path}")
     from OCP.APIHeaderSection import APIHeaderSection_MakeHeader
     mh = APIHeaderSection_MakeHeader(w.ChangeWriter().Model())
-    mh.SetName(TCollection_HAsciiString(str(path).split("/")[-1]))
+    mh.SetName(TCollection_HAsciiString(re.split(r"[\\/]", str(path))[-1]))  # file name only, never the directory
     mh.SetAuthorValue(1, TCollection_HAsciiString(author))
     mh.SetOrganizationValue(1, TCollection_HAsciiString(organization))
     mh.SetOriginatingSystem(TCollection_HAsciiString("agent-cad / OpenCascade"))
@@ -150,14 +152,14 @@ def read_step(path):
         return out
 
     def material(lab):
-        # density > 0 means a material is attached; it also gates FindAttribute (see above)
-        if XCAFDoc_MaterialTool.GetDensityForShape_s(lab) <= 0:
+        # IsAttribute gates FindAttribute (see above); a material with zero density is still a material
+        if not lab.IsAttribute(XCAFDoc.MaterialRefGUID_s()):
             return None, None
-        tn, m = TDataStd_TreeNode(), XCAFDoc_Material()
-        if lab.FindAttribute(XCAFDoc.MaterialRefGUID_s(), tn) and tn.HasFather() and \
-                tn.Father().Label().FindAttribute(XCAFDoc_Material.GetID_s(), m):
-            return m.GetName().ToCString(), m.GetDensity()  # density as written (g/cm3)
-        return None, None
+        tn = TDataStd_TreeNode(); lab.FindAttribute(XCAFDoc.MaterialRefGUID_s(), tn)
+        if not tn.HasFather() or not tn.Father().Label().IsAttribute(XCAFDoc_Material.GetID_s()):
+            return None, None
+        m = XCAFDoc_Material(); tn.Father().Label().FindAttribute(XCAFDoc_Material.GetID_s(), m)
+        return m.GetName().ToCString(), m.GetDensity()  # density as written (g/cm3)
 
     free = TDF_LabelSequence(); st.GetFreeShapes(free)
     asm_name, parts = None, []
