@@ -16,13 +16,20 @@ CASES = {"stem90_6061": StemParams(),
 BODY_RGB, FP_RGB = (0.604, 0.643, 0.694), (0.788, 0.541, 0.239)
 
 
+def part_specs(p, b, f):
+    """STEP products named by drawing number, so the controlling model and its
+    drawing ("図示なき外形形状は3Dモデル (同図番) による") identify each other."""
+    dn, rho = stem_drawing.doc_no(p), stem.density(p)
+    return (PartSpec(f"{dn}-01_STEM_BODY", b, BODY_RGB, p.material, rho),
+            PartSpec(f"{dn}-02_STEM_FACEPLATE", f, FP_RGB, p.material, rho))
+
+
 def make(name, p, out="out", do_render=True):
     os.makedirs(out, exist_ok=True)
     b, f = stem.build(p)
     r = stem.checks(p, b, f)
     rho = stem.density(p)
-    body = PartSpec("STEM_BODY", b, BODY_RGB, p.material, rho)
-    fp = PartSpec("STEM_FACEPLATE", f, FP_RGB, p.material, rho)
+    body, fp = part_specs(p, b, f)
     asm = name.upper()
     files = {f"{out}/{name}_body.step": ([body], None),
              f"{out}/{name}_faceplate.step": ([fp], None),
@@ -39,6 +46,7 @@ def make(name, p, out="out", do_render=True):
         to_dxf(sheet, f"{out}/{name}_{part}_drawing.dxf")
         dc = check_sheet(sheet)
         dc["dims"] = sheet.meta["dims"]
+        dc["drawing_no"] = sheet.meta["title_block"]["図番"]
         print(f"{name}_{part}_drawing: {'PASS' if dc['pass'] else 'FAIL'}", file=sys.stderr)
         drawings.append(dc)
     report = {"params": stem.asdict(p), "density_g_cm3": rho, "checks": r,

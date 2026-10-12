@@ -278,3 +278,66 @@ def test_general_tolerance_bands_are_unambiguous():
     assert {"0.5以上", "3以下", "30を超え", "120以下"} <= set(texts)
     import re
     assert not any(re.fullmatch(r"[\d.]+〜[\d.]+", t) for t in texts)
+
+
+def test_missing_primary_bore_gives_a_failed_sheet():
+    from build123d import Box
+    p = CASES[0]
+    rep = check_sheet(stem_drawing.body_sheet(p, Box(60, 40, 40)))      # nothing to recognise, must not raise
+    assert "feature.bar_bore" in {c["check"] for c in failed(rep)}
+    rep = check_sheet(stem_drawing.faceplate_sheet(p, Box(10, 40, 40)))
+    assert "feature.bar_bore" in {c["check"] for c in failed(rep)}
+
+
+def test_stack_height_ignores_proud_pinch_bosses():
+    p = stem.StemParams(stack_h=40, pinch_pitch=35)
+    rep = check_sheet(stem_drawing.body_sheet(p, stem.build(p)[0]))
+    assert "dim.stack_h" not in {c["check"] for c in failed(rep)}, failed(rep)
+
+
+def test_every_hole_of_a_4x_callout_is_measured():
+    from build123d import Cylinder, Plane, Align, Vector
+    from agent_cad.drawing.measure import find_cyl
+    import numpy as np
+    p = CASES[0]
+    f = stem.build(p)[1]
+    d, n, S, B = stem.frame(p)
+    dv = np.array([d.X, d.Y, d.Z])
+    hs = find_cyl(f, dv, r=p.bolt_clear_d / 2, inner=True)
+    c = hs[-1]                                    # not the first one the old code looked at
+    e0, e1 = c.axial_extent()
+    base = c.loc + dv * (e0 - c.loc @ dv)
+    bad = f - Plane(origin=Vector(*base), z_dir=Vector(*dv)) * Cylinder(c.r + 0.02, e1 - e0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    sh = stem_drawing.faceplate_sheet(p, bad)
+    assert len([d_ for d_ in sh.meta["dims"] if d_["name"].startswith("bolt_clear_d")]) == 4
+    assert any(c_["check"].startswith("dim.bolt_clear_d") for c_ in failed(check_sheet(sh)))
+
+
+def test_round_window_of_bolt_size_is_not_a_bolt_hole():
+    p = stem.StemParams(fp_window_w=5.5, fp_window_h=5.5)
+    rep = check_sheet(stem_drawing.faceplate_sheet(p, stem.build(p)[1]))
+    bad = {c["check"] for c in failed(rep)}
+    assert not bad & {"feature.bolt_holes", "feature.bolt_pattern"}, failed(rep)
+
+
+def test_slot_centre_and_faceplate_model_note():
+    p = CASES[0]
+    b, f = stem.build(p)
+    dims = {d["name"]: d for d in stem_drawing.body_sheet(p, b).meta["dims"]}
+    assert abs(dims["slot_center_y"]["measured"]) < 1e-3 and dims["slot_center_y"]["intent"] == 0.0
+    assert any("3Dモデル" in n for n in stem_drawing.faceplate_sheet(p, f).meta["notes"])
+
+
+def test_window_radius_is_checked():
+    p = CASES[0]
+    dims = {d["name"]: d for d in stem_drawing.faceplate_sheet(p, stem.build(p)[1]).meta["dims"]}
+    assert abs(dims["window_r"]["measured"] - min(p.fp_window_w, p.fp_window_h) / 2) < 1e-3
+
+
+def test_step_products_carry_the_drawing_number():
+    from scripts.make_stem import part_specs
+    p = CASES[1]
+    b, f = stem.build(p)
+    body, fp = part_specs(p, b, f)
+    assert body.name.startswith(stem_drawing.body_sheet(p, b).meta["title_block"]["図番"])
+    assert fp.name.startswith(stem_drawing.doc_no(p) + "-02")

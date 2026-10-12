@@ -47,9 +47,25 @@ class _Dims:
         self.sheet.meta.setdefault("roughness_local", []).append(
             dict(name=name, drawn=value, required=value if required is None else required))
 
+    def each(self, name, values, intent, text):
+        """Record one dimension per feature an N× callout covers; the first keeps the plain name."""
+        for i, v in enumerate(values):
+            self.rec(name if i == 0 else f"{name}#{i + 1}", v, intent, text(v))
+
     def need(self, name, found, expected):
         """Required feature: check_sheet fails if the model does not have it."""
         self.sheet.meta.setdefault("features", []).append(dict(name=name, found=int(found), expected=int(expected)))
+
+
+def _unrecognised(p, size, part, part_name, dwg, found):
+    """A model lacking a primary feature cannot be drawn: a sheet that only records
+    the missing features (check_sheet fails it) instead of an exception."""
+    sh = Sheet(size); D = _Dims(sh)
+    for k, v in found.items():
+        D.need(k, v, 1)
+    _title(sh, p, part_name, dwg, 0.0)
+    sh.meta["part"] = part
+    return sh
 
 
 def _notes(sh, lines, pos):
@@ -145,13 +161,15 @@ def _body_sheet(p, body, dwg_no, size, k):
     rho = stem.density(p)
 
     # ---- measurements
-    st_bore = max(find_cyl(body, (0, 0, 1), near=(0, 0, 0), inner=True), key=lambda c: c.r)
-    st_out = max(find_cyl(body, (0, 0, 1), near=(0, 0, 0), inner=False), key=lambda c: c.r)
-    bar_bore = [c for c in find_cyl(body, (0, 1, 0), inner=True) if c.r > 10][0]
+    st_bore = max(find_cyl(body, (0, 0, 1), near=(0, 0, 0), inner=True), key=lambda c: c.r, default=None)
+    st_out = max(find_cyl(body, (0, 0, 1), near=(0, 0, 0), inner=False), key=lambda c: c.r, default=None)
+    bar_bore = max((c for c in find_cyl(body, (0, 1, 0), inner=True) if c.r > 10), key=lambda c: c.r, default=None)
+    if None in (st_bore, st_out, bar_bore):
+        return _unrecognised(p, size, "STEM_BODY", "ステム 本体 (STEM BODY)", f"{dwg_no or doc_no(p)}-01",
+                             dict(steerer_bore=st_bore is not None, steerer_clamp=st_out is not None,
+                                  bar_bore=bar_bore is not None))
     Bm = bar_bore.loc - (bar_bore.loc @ np.array([0, 1, 0])) * np.array([0, 1, 0])
-    zs = [z for z, f, _ in planes(body, (0, 0, 1), near_center=np.zeros(3), radius=1e9)
-          if np.hypot(f.center().X, f.center().Y) < st_out.r + 12]
-    z0, z1 = min(zs), max(zs)
+    z0, z1 = st_out.axial_extent()       # the clamp cylinder itself: pinch bosses may stand proud of it
     Sm = np.array([0, 0, (z0 + z1) / 2])
     L = np.linalg.norm(Bm - Sm); ang = math.degrees(math.atan2(Bm[2] - Sm[2], Bm[0] - Sm[0]))
     y0, y1 = bar_bore.axial_extent()
@@ -164,6 +182,8 @@ def _body_sheet(p, body, dwg_no, size, k):
     cbores = find_cyl(body, (0, 1, 0), r=p.cbore_d / 2, inner=True)
     slot = sorted(y for y, f, _ in planes(body, (0, 1, 0)) if f.center().X < -st_bore.r and abs(f.center().Y) < 5)
     slot_w = slot[-1] - slot[0] if len(slot) >= 2 else float("nan")
+    if len(slot) >= 2:                   # the split is symmetric about the stem plane (Y = 0)
+        D.rec("slot_center_y", (slot[0] + slot[-1]) / 2, 0.0, "")
     D.need("pinch_holes", len(pinch), 2); D.need("pinch_cbores", len(cbores), 2)
     D.need("fp_taps", len(taps), 4); D.need("slot", 0 if math.isnan(slot_w) else 1, 1)
     ptaps = find_cyl(body, (0, 1, 0), r=p.tap_drill_d / 2, inner=True)     # pinch threads, -Y ear
@@ -252,14 +272,13 @@ def _body_sheet(p, body, dwg_no, size, k):
         sh.dim(fs((bx, 0, pinch[0].loc[2])), fs((0, 0, pinch[0].loc[2])), -k * (pinch[0].loc[2] - z0) - 5, _fmt(-bx))
         D.rec("pinch_bolt_x", -bx, p.steerer_d / 2 + p.pinch_wall + p.bolt_clear_d / 2, _fmt(-bx))
         cb_lo, cb_hi = cbores[0].axial_extent() if cbores else (0.0, 0.0)
-        D.rec("pinch_cbore_depth", cb_hi - cb_lo, p.cbore_depth, _fmt(cb_hi - cb_lo))
-        D.rec("pinch_clear_d", 2 * pinch[0].r, p.bolt_clear_d, f"φ{_fmt(2 * pinch[0].r)}")
-        if cbores:
-            D.rec("pinch_cbore_d", 2 * cbores[0].r, p.cbore_d, f"φ{_fmt(2 * cbores[0].r)}")
+        # every hole the 2x callouts cover, not just the first
+        D.each("pinch_cbore_depth", [np.subtract(*c.axial_extent()[::-1]) for c in cbores] or [0.0], p.cbore_depth, _fmt)
+        D.each("pinch_clear_d", [2 * c.r for c in pinch], p.bolt_clear_d, lambda v: f"φ{_fmt(v)}")
+        D.each("pinch_cbore_d", [2 * c.r for c in cbores], p.cbore_d, lambda v: f"φ{_fmt(v)}")
         pt_lo, pt_hi = ptaps[0].axial_extent() if ptaps else (0.0, 0.0)
-        if ptaps:
-            D.rec("pinch_tap_drill_d", 2 * ptaps[0].r, p.tap_drill_d, f"φ{_fmt(2 * ptaps[0].r)}")
-            D.rec("pinch_tap_length", pt_hi - pt_lo, p.ear_half_w - p.slot_w / 2, _fmt(pt_hi - pt_lo))
+        D.each("pinch_tap_drill_d", [2 * c.r for c in ptaps], p.tap_drill_d, lambda v: f"φ{_fmt(v)}")
+        D.each("pinch_tap_length", [np.subtract(*c.axial_extent()[::-1]) for c in ptaps], p.ear_half_w - p.slot_w / 2, _fmt)
         lb = left.bbox()
         sh.leader(fs(pinch[0].loc - (0, 0, pinch[0].r * 0.7)),
                   [lb[0] + (-4, -12), lb[0] + (-4, -22), (lb[0][0] - 4, lb[1][1] + 26)], "", right=True,
@@ -297,8 +316,8 @@ def _body_sheet(p, body, dwg_no, size, k):
         D.rec("fp_bolt_pitch_y", wy, 2 * p.fp_bolt_w, _fmt(wy)); D.rec("fp_bolt_pitch_n", hn, 2 * p.fp_bolt_off, _fmt(hn))
         tr = taps[int(np.argmax(q[:, 0] + q[:, 1]))].loc
         e0, e1 = taps[0].axial_extent()      # opens on the mating face, so the extent is the drill depth
-        D.rec("fp_tap_drill_depth", e1 - e0, p.tap_depth, _fmt(e1 - e0))
-        D.rec("fp_tap_drill_d", 2 * taps[0].r, p.tap_drill_d, f"φ{_fmt(2 * taps[0].r)}")
+        D.each("fp_tap_drill_depth", [np.subtract(*c.axial_extent()[::-1]) for c in taps], p.tap_depth, _fmt)
+        D.each("fp_tap_drill_d", [2 * c.r for c in taps], p.tap_drill_d, lambda v: f"φ{_fmt(v)}")
         sh.leader(aux.to_sheet(tr) + (1.2, 1.2), [(ab[1][0] + 4, ab[1][1] + 4), (ab[0][0] - 4, ab[1][1] + 4)], "",
                   lines=[f"4×M5×0.8 深さ{_fmt(e1 - e0 - 2)}", f"  下穴φ{_fmt(2 * taps[0].r)} 深さ{_fmt(e1 - e0)}"])
         w_, h_ = sh.fcf((ab[0][0], ab[0][1] - 26), ["flatness", "0.05"])
@@ -477,9 +496,19 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     Bm = np.array([B.X, B.Y, B.Z])
     sh = Sheet(size); D = _Dims(sh)
     kx, ky = size[0] / A3[0], size[1] / A3[1]
-    bore = [c for c in find_cyl(fp, (0, 1, 0), inner=True) if c.r > 10][0]
-    holes = find_cyl(fp, dv, r=p.bolt_clear_d / 2, inner=True)
-    cb = find_cyl(fp, dv, r=p.cbore_d / 2, inner=True)
+    bore = max((c for c in find_cyl(fp, (0, 1, 0), inner=True) if c.r > 10), key=lambda c: c.r, default=None)
+    if bore is None:
+        return _unrecognised(p, size, "STEM_FACEPLATE", "ステム フェイスプレート (FACEPLATE)",
+                             f"{dwg_no or doc_no(p)}-02", dict(bar_bore=False))
+
+    def off_window(cs):
+        # the window's end radii are cylinders too: one of the same radius is not a bolt hole
+        if not (p.fp_window_w > 0 and p.fp_window_h > 0):
+            return cs
+        return [c for c in cs if abs((c.loc - Bm) @ np.array([0, 1, 0])) > p.fp_window_w / 2 + 0.01
+                or abs((c.loc - Bm) @ nv) > p.fp_window_h / 2 + 0.01]
+    holes = off_window(find_cyl(fp, dv, r=p.bolt_clear_d / 2, inner=True))
+    cb = off_window(find_cyl(fp, dv, r=p.cbore_d / 2, inner=True))
     y0, y1 = bore.axial_extent()
     fronts = planes(fp, dv)
     # boss face (outward +d) and mating face (outward -d): the largest planar face of each
@@ -547,10 +576,8 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     D.need("bolt_pattern", _corners([(c.loc[1] - Bm[1], (c.loc - Bm) @ nv) for c in holes], p.fp_bolt_w, p.fp_bolt_off), 4)
     # the 4x callout says every counterbore is concentric with a clearance hole: check their axes too
     D.need("cbore_pattern", _corners([(c.loc[1] - Bm[1], (c.loc - Bm) @ nv) for c in cb], p.fp_bolt_w, p.fp_bolt_off), 4)
-    if holes:
-        D.rec("bolt_clear_d", 2 * holes[0].r, p.bolt_clear_d, f"φ{_fmt(2 * holes[0].r)}")
-    if cb:
-        D.rec("cbore_d", 2 * cb[0].r, p.cbore_d, f"φ{_fmt(2 * cb[0].r)}")
+    D.each("bolt_clear_d", [2 * c.r for c in holes], p.bolt_clear_d, lambda v: f"φ{_fmt(v)}")   # all four
+    D.each("cbore_d", [2 * c.r for c in cb], p.cbore_d, lambda v: f"φ{_fmt(v)}")
     if len(holes) == 4:
         q = np.array([[c.loc[1], (c.loc - Bm) @ nv] for c in holes])
         wy, hn = np.ptp(q[:, 0]), np.ptp(q[:, 1])
@@ -560,7 +587,7 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
         sh.dim(fs(tr - nv * hn), fs(tr), -((y1 - tr[1]) * scale + 10), _fmt(hn), u=(0, 1))
         D.rec("bolt_pitch_y", wy, 2 * p.fp_bolt_w, _fmt(wy)); D.rec("bolt_pitch_n", hn, 2 * p.fp_bolt_off, _fmt(hn))
         cb_depth = t_front - (cb[0].axial_extent()[0] - Bm @ dv) if cb else 0.0
-        D.rec("cbore_depth", cb_depth, 2.5, _fmt(cb_depth))
+        D.each("cbore_depth", [t_front - (c.axial_extent()[0] - Bm @ dv) for c in cb] or [0.0], 2.5, _fmt)
         fb_ = front.bbox()
         sh.leader(fs(tl) + np.array([-1, 1]) * scale * holes[0].r * 0.7,
                   [fs(Bm) + (-75, 62), (fb_[0][0] - 10, fb_[1][1] + 10), (fb_[0][0] - 30, fb_[1][1] + 18),
@@ -577,10 +604,13 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
                       lines=[f"窓 {_fmt(ww)}×{_fmt(wh)}", f"R{_fmt(wr)} 貫通"])
         D.rec("window_w", ww, p.fp_window_w if want_win else 0.0, _fmt(ww))
         D.rec("window_h", wh, p.fp_window_h if want_win else 0.0, _fmt(wh))
+        # full-round slot: the end radius is half the smaller size (stem._window_profile)
+        D.rec("window_r", wr, min(p.fp_window_w, p.fp_window_h) / 2 if want_win else 0.0, _fmt(wr))
     mass = fp.volume / 1000 * stem.density(p)
     _title(sh, p, "ステム フェイスプレート (FACEPLATE)", f"{dwg_no or doc_no(p)}-02", mass, scale=_scale_text(scale))
     _notes(sh, _common_notes(sh, p, [f"※ φ{_fmt(2 * bore.r)} は本体と組み付けた状態で仕上げる (共加工)。",
-                                 f"本体との合わせ面のすき間 {_fmt(2 * t_back)} (締結前、参考)。"]), (16, 106))
+                                 f"本体との合わせ面のすき間 {_fmt(2 * t_back)} (締結前、参考)。",
+                                 "図示なき外形形状は3Dモデル (STEP AP242、同図番) による。"]), (16, 106))
     _general_tol_table(sh, (16, 36))
     sh.meta["part"] = "STEM_FACEPLATE"
     return sh
