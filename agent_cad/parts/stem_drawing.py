@@ -67,6 +67,16 @@ def _covered(edge, faces):
     return g.Mass()
 
 
+def _material_in(shape, a, b, r):
+    """Volume of `shape` inside the cylinder of radius r from point a to point b: 0 when
+    the whole cross-section is clear (a skin or bridge of any thickness or shape shows)."""
+    from build123d import Cylinder, Plane, Align, Vector
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    cyl = Plane(origin=Vector(*a), z_dir=Vector(*(b - a))) * Cylinder(
+        r, float(np.linalg.norm(b - a)), align=(Align.CENTER, Align.CENTER, Align.MIN))
+    return (shape & cyl).volume
+
+
 def _span(c, u):
     """(low, high) extent of cylinder c along the unit vector u, whichever way its axis points."""
     e = np.array(c.axial_extent()) * np.sign(c.axis @ np.asarray(u, float))
@@ -225,6 +235,13 @@ def _body_sheet(p, body, dwg_no, size, k):
         for side, ys in (("lo", slot[0]), ("hi", slot[-1])):
             fs_ = Compound([f for y, f in slot_faces if abs(y - ys) < 1e-6])
             D.rec(f"slot_{side}_uncovered", (z1 - z0) - _covered(Edge.make_line((xm, ys, z0), (xm, ys, z1)), fs_), 0.0, "")
+        # and nothing bridges it anywhere behind the steerer axis: the slot region (between
+        # its faces, x < 0, the clamp height) holds no material
+        from build123d import Box, Pos
+        bb_ = body.bounding_box()
+        gap = slot[-1] - slot[0] - 2e-3
+        region = Pos((bb_.min.X - 1) / 2, (slot[0] + slot[-1]) / 2, (z0 + z1) / 2) * Box(1 - bb_.min.X, gap, z1 - z0)
+        D.rec("slot_bridged_mm3", (body & region).volume, 0.0, "")
     D.need("pinch_holes", len(pinch), 2); D.need("pinch_cbores", len(cbores), 2)
     D.need("fp_taps", len(taps), 4); D.need("slot", 0 if math.isnan(slot_w) else 1, 1)
     ptaps = pinch_side(find_cyl(body, (0, 1, 0), r=p.tap_drill_d / 2, inner=True))     # pinch threads, -Y ear
@@ -351,9 +368,9 @@ def _body_sheet(p, body, dwg_no, size, k):
             t0, t1 = _span(c, (0, 1, 0))
             sfx = "" if i == 0 else f"#{i + 1}"
             D.rec("pinch_tap_to_slot" + sfx, (slot[0] if len(slot) >= 2 else float("inf")) - t1, 0.0, "")
-            # opens: along its axis, from inside the drill out past its end, no material at all
-            D.rec("pinch_tap_open" + sfx, _covered(Edge.make_line((c.loc[0], (t0 + t1) / 2, c.loc[2]),
-                                                                  (c.loc[0], t0 - 1.0, c.loc[2])), body), 0.0, "")
+            # opens: across the drill's whole section, from inside it out past its end, no material
+            D.rec("pinch_tap_open" + sfx, _material_in(body, (c.loc[0], (t0 + t1) / 2, c.loc[2]),
+                                                       (c.loc[0], t0 - 1.0, c.loc[2]), 0.98 * c.r), 0.0, "")
         cb_lo, cb_hi = cbores[0].axial_extent() if cbores else (0.0, 0.0)
         # every hole the 2x callouts cover, not just the first
         D.each("pinch_cbore_depth", [np.subtract(*c.axial_extent()[::-1]) for c in cbores] or [0.0], p.cbore_depth, _fmt)
@@ -405,8 +422,9 @@ def _body_sheet(p, body, dwg_no, size, k):
         e0, e1 = taps[0].axial_extent()      # opens on the mating face, so the extent is the drill depth
         D.each("fp_tap_drill_depth", [np.subtract(*c.axial_extent()[::-1]) for c in taps], p.tap_depth, _fmt)
         # blind tapped holes "on the mating face": each drill's open end lies on that face
-        mface = max(((f.area, z) for z, f, nn in planes(body, dv) if nn @ dv > 0 and abs(z - Bm @ dv) < 5),
-                    default=(0, float("inf")))[1]
+        # the mating face is the split plane: the body lies behind it, so it is the frontmost
+        # +d plane however wide the faceplate gap
+        mface = max((z for z, f, nn in planes(body, dv) if nn @ dv > 0), default=float("inf"))
         for i, c in enumerate(taps):
             D.rec("fp_tap_on_mating_face" + ("" if i == 0 else f"#{i + 1}"), mface - _span(c, dv)[1], 0.0, "")
         D.each("fp_tap_drill_d", [2 * c.r for c in taps], p.tap_drill_d, lambda v: f"φ{_fmt(v)}")
@@ -705,13 +723,11 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
         D.rec("bolt_pitch_y", wy, 2 * p.fp_bolt_w, _fmt(wy)); D.rec("bolt_pitch_n", hn, 2 * p.fp_bolt_off, _fmt(hn))
         cb_depth = t_front - (cb[0].axial_extent()[0] - Bm @ dv) if cb else 0.0
         D.each("cbore_depth", [t_front - (c.axial_extent()[0] - Bm @ dv) for c in cb] or [0.0], 2.5, _fmt)
-        # each counterbore opens out of the front: along its axis, from inside the counterbore
-        # out past its top, no material at all (a skin of any thickness shows)
-        from build123d import Edge
-
+        # each counterbore opens out of the front: across its whole section, from inside it
+        # out past its top, no material (a skin or ring of any thickness shows)
         def axis_pt(c, t):               # point on c's axis at t along d from Bm
-            return tuple(c.loc + dv * (Bm @ dv + t - c.loc @ dv))
-        D.each("cbore_open", [_covered(Edge.make_line(axis_pt(c, sum(span_d(c)) / 2), axis_pt(c, span_d(c)[1] + 1.0)), fp)
+            return c.loc + dv * (Bm @ dv + t - c.loc @ dv)
+        D.each("cbore_open", [_material_in(fp, axis_pt(c, sum(span_d(c)) / 2), axis_pt(c, span_d(c)[1] + 1.0), 0.98 * c.r)
                               for c in cb], 0.0, lambda v: "")
         fb_ = front.bbox()
         sh.leader(fs(tl) + np.array([-1, 1]) * scale * holes[0].r * 0.7,
