@@ -202,6 +202,18 @@ def _mesh_volume(shape, tol=0.02):
     return float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6.0)
 
 
+def _stray(shape):
+    """Faces, edges or vertices outside any solid (e.g. a loose vertex in the compound)."""
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopAbs import TopAbs_SOLID
+    n = 0
+    for kind, avoid in ((TopAbs_FACE, TopAbs_SOLID), (TopAbs_EDGE, TopAbs_FACE), (TopAbs_VERTEX, TopAbs_EDGE)):
+        ex = TopExp_Explorer(shape, kind, avoid)
+        while ex.More():
+            n += 1; ex.Next()
+    return n
+
+
 def _iter(shape, kind):
     from OCP.TopExp import TopExp_Explorer
     ex = TopExp_Explorer(shape, kind)
@@ -275,7 +287,9 @@ def check_step(path, reference, assembly_name=None):
         results.append(_check(f"{n}.material", mat_ok, read=rp.material, density_g_cm3=rp.density_g_cm3,
                               expected=ref.material or None, expected_density_g_cm3=ref.density_g_cm3 or None))
         results.append(_check(f"{n}.topo.valid", BRepCheck_Analyzer(s.wrapped).IsValid()))
-        results.append(_check(f"{n}.topo.one_solid", len(s.solids()) == 1, solids=len(s.solids())))
+        stray = _stray(s.wrapped)
+        results.append(_check(f"{n}.topo.one_solid", len(s.solids()) == 1 and stray == 0,
+                              solids=len(s.solids()), stray_subshapes=stray))
         fe = _free_edges(s.wrapped)
         results.append(_check(f"{n}.topo.closed", fe == 0, free_edges=fe))
         (v, a, c), (v0, a0, c0) = _mass(s), _mass(ref.shape)
