@@ -60,9 +60,13 @@ def find_cyl(shape, axis, r=None, near=None, inner=None, rtol=0.05):
                 continue
         c.axis = axis if c.axis @ axis > 0 else -c.axis
         res.append(c)
+    # merge faces of the same cylinder whose axial extents touch or overlap; a stretch
+    # interrupted by material stays two cylinders, so a blocked bore shows its gap
     uniq = []
-    for c in res:  # merge faces of the same cylinder
-        same = [u for u in uniq if abs(c.r - u.r) < 1e-6 and np.linalg.norm(np.cross(c.loc - u.loc, axis)) < 1e-6]
+    for c in sorted(res, key=lambda c: c.axial_extent()[0]):
+        lo, hi = c.axial_extent()
+        same = [u for u in uniq if abs(c.r - u.r) < 1e-6 and np.linalg.norm(np.cross(c.loc - u.loc, axis)) < 1e-6
+                and lo <= u.axial_extent()[1] + 1e-6]
         if same:
             same[0].faces += c.faces
         else:

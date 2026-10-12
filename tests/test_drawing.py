@@ -516,3 +516,42 @@ def test_lightening_bore_runs_the_whole_body_and_is_not_a_tap(monkeypatch):
     monkeypatch.setattr(stem, "extrude", short_bore)
     bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, stem.build(p)[0])))}
     assert "dim.light_to_bar_bore" in bad and "dim.light_d" not in bad
+
+
+def test_features_are_checked_over_their_whole_length():
+    """A web across a bore or the slot, a pinch tap that no longer opens on the ear
+    face, a counterbore under a skin: each is reported, however thin."""
+    import numpy as np
+    from build123d import Box, Cylinder, Plane, Pos, Align, Vector
+    from agent_cad.drawing.measure import find_cyl
+    p = CASES[0]
+    b, f = stem.build(p)
+    good = {d["name"]: d for d in stem_drawing.body_sheet(p, b).meta["dims"]}
+    assert abs(good["pinch_tap_to_slot#2"]["measured"]) < 1e-3 and good["pinch_tap_open#2"]["measured"] == 0
+    zm = p.stack_h / 2 + 3
+    web = Pos(0, 0, zm) * Cylinder(p.steerer_d / 2 + 0.01, 0.5)
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, b + web)))}
+    assert {"dim.steerer_bore_bottom", "dim.steerer_bore_top"} & bad
+    xm = -(p.steerer_d / 2 + p.steerer_d / 2 + p.steerer_wall) / 2
+    bridge = Pos(xm, 0, zm) * Box(2, p.slot_w + 0.02, 0.3)
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, b + bridge)))}
+    assert {"dim.slot_lo_uncovered", "dim.slot_hi_uncovered"} <= bad
+    tap = min(find_cyl(b, (0, 1, 0), r=p.tap_drill_d / 2, inner=True), key=lambda c: c.loc[2])
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, _refill_and_move(b, tap, (0, 1.0, 0)))))}
+    assert any(x.startswith("dim.pinch_tap_open") for x in bad)
+    d, n, S, B = stem.frame(p)
+    dv = np.array([d.X, d.Y, d.Z])
+    c = find_cyl(f, dv, r=p.cbore_d / 2, inner=True)[0]
+    top = c.loc + dv * (max(np.array(c.axial_extent()) * np.sign(c.axis @ dv)) - c.loc @ dv)
+    skin = Plane(origin=Vector(*top), z_dir=Vector(*-dv)) * Cylinder(c.r + 0.01, 0.5, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + skin)))}
+    assert any(x.startswith("dim.cbore_open") for x in bad)
+
+
+def test_pdf_hatch_uses_the_declared_width(tmp_path):
+    import matplotlib
+    from agent_cad.drawing.sheet import STYLES
+    from agent_cad.drawing.render import PT_PER_MM
+    p = CASES[0]
+    to_pdf(stem_drawing.body_sheet(p, stem.build(p)[0]), tmp_path / "b.pdf")
+    assert abs(matplotlib.rcParams["hatch.linewidth"] - STYLES["hatch"][0] * PT_PER_MM) < 1e-9

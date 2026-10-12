@@ -32,6 +32,7 @@ def to_pdf(sheet, path, dpi=200):
     fig = plt.figure(figsize=(W / 25.4, H / 25.4))
     ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, W); ax.set_ylim(0, H); ax.set_aspect("equal"); ax.axis("off")
     font = _font()
+    matplotlib.rcParams["hatch.linewidth"] = STYLES["hatch"][0] * PT_PER_MM   # read when each patch is made
     for it in sheet.items:
         k = it[0]
         if k == "line":
@@ -50,7 +51,6 @@ def to_pdf(sheet, path, dpi=200):
             _, x, y, s, size, rot, ha, va = it
             ax.text(x, y, s, fontsize=size * PT_PER_MM * 1.25, rotation=rot, ha=ha, va=va,
                     fontfamily=font, rotation_mode="anchor")
-    matplotlib.rcParams["hatch.linewidth"] = 0.3
     fig.savefig(path, dpi=dpi, facecolor="white")
     plt.close(fig)
 
