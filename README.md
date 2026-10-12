@@ -10,6 +10,9 @@
 - `agent_cad/fea/` 線形静解析（gmsh + scikit-fem, P2四面体）
 - `agent_cad/step_io.py` STEP AP242 入出力（製品構成・部品名・色・材質/密度・幾何検証プロパティ付き）
 - `agent_cad/verify/step_check.py` STEP受け渡しの自己完結チェック（下記）
+- `agent_cad/drawing/` JIS図面（第三角法、断面・矢視、寸法・はめあい・幾何公差・表面粗さ、表題欄）をPDF/DXFで出力
+- `agent_cad/standards/jis.py` JIS B 0405 普通公差、JIS B 0401 はめあい表
+- `agent_cad/parts/stem_drawing.py` ステム本体・フェイスプレートの図面定義
 - `agent_cad/render.py` 簡易レンダリング（matplotlib）
 - `scripts/` 生成スクリプト（出力は `out/`）
 
@@ -41,3 +44,20 @@ CATIA実機での読込確認ができるまで、書き出したSTEPを以下�
 ```sh
 python -m pytest -q tests   # 正常ファイルの合格と、面欠落・検証値改ざん・単位違いの検出を確認
 ```
+
+## 図面（JIS）
+
+`make_stem` は部品ごとに `out/<名前>_<部品>_drawing.pdf` と `.dxf` を出力する。
+
+- 第三角法、A3（収まらなければA2）、尺度は1:1（小物は2:1）
+- 寸法値はパラメータではなくB-repから測った値を記入する（穴径、軸間距離、ボルトピッチなど）
+- はめあい公差はJIS B 0401の表から計算する（クランプ穴はF8）。普通公差はJIS B 0405-m、幾何公差の普通公差はJIS B 0419-K
+- 表面粗さはJIS B 0031の記号で記入する（一括指示はRa 3.2、クランプ穴と合わせ面はRa 1.6）
+- 材料はJIS H 4140の鍛造品記号、表面処理はJIS H 8601
+
+図面チェック（`agent_cad/drawing/check.py`）：
+
+- 測った寸法と設計意図（パラメータ）が0.005以内で一致すること
+- はめあいの許容差が表の値と一致すること
+- 表題欄・投影法・普通公差・一括粗さの記載があること
+- 文字どうし、および文字と外形線が重ならず、文字が枠内に収まること

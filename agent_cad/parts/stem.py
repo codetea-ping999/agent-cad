@@ -140,7 +140,10 @@ def build(p: StemParams):
             loc = Vector(0, sv * p.fp_bolt_off, sw * p.fp_bolt_w)
             # faceplate: clearance + counterbore from front face
             fpl = Plane(origin=bar_pl.from_local_coords((p.fp_front + 0.01, loc.Y, loc.Z)), z_dir=-d)
-            faceplate -= fpl * Cylinder(p.cbore_d / 2, 2 * 2.5)
+            # counterbore 2.5 deep; the cutter is long so it also clears the clamp ring
+            # standing proud of the boss face in its path, as the real tool would
+            faceplate -= Plane(origin=fpl.origin - d * 2.51, z_dir=d) * Cylinder(
+                p.cbore_d / 2, 40, align=(Align.CENTER, Align.CENTER, Align.MIN))
             faceplate -= fpl * Cylinder(p.bolt_clear_d / 2, 40, align=(Align.CENTER, Align.CENTER, Align.MIN))
             # body: tap drill
             bpl = Plane(origin=bar_pl.from_local_coords((0, loc.Y, loc.Z)), z_dir=-d)
