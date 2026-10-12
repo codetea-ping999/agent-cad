@@ -455,3 +455,43 @@ def test_faceplate_bolt_holes_must_be_through():
     plug = Plane(origin=Vector(*start), z_dir=Vector(*dv)) * Cylinder(c.r + 0.01, 2.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
     bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + plug)))}
     assert any(x.startswith("dim.bolt_hole_from_mating_face") for x in bad)
+
+
+def test_thin_lines_follow_the_jis_line_group():
+    from agent_cad.drawing.sheet import STYLES
+    assert STYLES["outline"][0] == 0.5
+    assert all(STYLES[k][0] == 0.25 for k in ("thin", "center", "hatch", "hidden"))
+
+
+def test_holes_run_where_the_drawing_says(monkeypatch):
+    """Through bores span their clamp, pinch holes reach the slot, faceplate taps open
+    on the mating face: each fails when the cutter is shortened or moved."""
+    import numpy as np
+    from build123d import Cylinder, Plane, Align, Vector
+    from agent_cad.drawing.measure import find_cyl
+    p = CASES[0]
+    b = stem.build(p)[0]
+    good = {d["name"]: d for d in stem_drawing.body_sheet(p, b).meta["dims"]}
+    for k in ("steerer_bore_bottom", "steerer_bore_top", "bar_bore_y_lo", "pinch_hole_from_slot",
+              "pinch_hole_to_cbore#2", "fp_tap_on_mating_face#4"):
+        assert abs(good[k]["measured"]) < 1e-3, k
+    # steerer bore blind for its lowest 3 mm
+    plug = Cylinder(p.steerer_d / 2 + 0.01, 3.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, b + plug)))}
+    assert "dim.steerer_bore_bottom" in bad and "dim.steerer_bore_d" not in bad
+    # one pinch clearance hole stops 2 mm short of the slot
+    h = min(find_cyl(b, (0, 1, 0), r=p.bolt_clear_d / 2, inner=True), key=lambda c: c.loc[2])
+    plug = Plane(origin=Vector(h.loc[0], p.slot_w / 2, h.loc[2]), z_dir=(0, 1, 0)) * Cylinder(
+        h.r + 0.01, 2.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, b + plug)))}
+    assert any(c.startswith("dim.pinch_hole_from_slot") for c in bad) and "dim.slot_w" not in bad
+    # faceplate tap drills start 1 mm inside the body
+    d, n, S, B = stem.frame(p)
+    dv = np.array([d.X, d.Y, d.Z])
+    taps = find_cyl(b, dv, r=p.tap_drill_d / 2, inner=True)
+    for c in taps:
+        top = c.loc + dv * (max(np.array(c.axial_extent()) * np.sign(c.axis @ dv)) - c.loc @ dv)
+        b = b + Plane(origin=Vector(*top), z_dir=Vector(*-dv)) * Cylinder(
+            c.r + 0.01, 1.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, b)))}
+    assert "dim.fp_tap_on_mating_face" in bad

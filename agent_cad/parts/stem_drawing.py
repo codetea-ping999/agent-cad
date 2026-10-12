@@ -57,6 +57,12 @@ class _Dims:
         self.sheet.meta.setdefault("features", []).append(dict(name=name, found=int(found), expected=int(expected)))
 
 
+def _span(c, u):
+    """(low, high) extent of cylinder c along the unit vector u, whichever way its axis points."""
+    e = np.array(c.axial_extent()) * np.sign(c.axis @ np.asarray(u, float))
+    return float(e.min()), float(e.max())
+
+
 def _unrecognised(p, size, part, part_name, dwg, found):
     """A model lacking a primary feature cannot be drawn: a sheet that only records
     the missing features (check_sheet fails it) instead of an exception."""
@@ -189,7 +195,11 @@ def _body_sheet(p, body, dwg_no, size, k):
     pinch = sorted(find_cyl(body, (0, 1, 0), r=p.bolt_clear_d / 2, inner=True), key=lambda c: c.loc[2])
     taps = find_cyl(body, dv, r=p.tap_drill_d / 2, inner=True)
     cbores = find_cyl(body, (0, 1, 0), r=p.cbore_d / 2, inner=True)
-    slot_faces = [(y, f) for y, f, _ in planes(body, (0, 1, 0)) if f.center().X < -st_bore.r and abs(f.center().Y) < 5]
+    # slot side faces: Y planes across the clamp wall behind the bore (the probe line x = xm),
+    # not, say, the bottom of a blind pinch hole
+    xm = -(st_bore.r + st_out.r) / 2
+    slot_faces = [(y, f) for y, f, _ in planes(body, (0, 1, 0))
+                  if abs(f.center().Y) < 5 and f.bounding_box().min.X <= xm <= f.bounding_box().max.X]
     slot = sorted({round(y, 6) for y, _ in slot_faces})
     slot_w = slot[-1] - slot[0] if len(slot) >= 2 else float("nan")
     if len(slot) >= 2:                   # the split is symmetric about the stem plane (Y = 0)
@@ -197,7 +207,6 @@ def _body_sheet(p, body, dwg_no, size, k):
         # the split runs through the whole clamp: across the clamp wall, each side face
         # covers z0..z1 (sampled every ~1 mm); record the length it leaves uncovered
         from build123d import Compound, Vector
-        xm = -(st_bore.r + st_out.r) / 2
         zs = np.linspace(z0 + 0.25, z1 - 0.25, max(9, int(z1 - z0) + 1))
         for side, ys in (("lo", slot[0]), ("hi", slot[-1])):
             fs_ = Compound([f for y, f in slot_faces if abs(y - ys) < 1e-6])
@@ -255,6 +264,8 @@ def _body_sheet(p, body, dwg_no, size, k):
     t = _fit_text(2 * st_bore.r, BORE_FIT)
     sh.dim(fs((-st_bore.r, 0, z0)), fs((st_bore.r, 0, z0)), -15, t[0], tol=t[1])
     D.rec("steerer_bore_d", 2 * st_bore.r, p.steerer_d, t[0], t[1])
+    sb0, sb1 = _span(st_bore, (0, 0, 1))      # no depth on the callout: through the clamp, z0..z1
+    D.rec("steerer_bore_bottom", sb0 - z0, 0.0, ""); D.rec("steerer_bore_top", z1 - sb1, 0.0, "")
     sh.dim(fs((-st_out.r, 0, z0)), fs((-st_out.r, 0, z1)), 22, _fmt(z1 - z0))
     D.rec("stack_h", z1 - z0, p.stack_h, _fmt(z1 - z0))
     sh.dim(fs(Sm), fs(Bm), 38 if ang >= 0 else -38, _fmt(L), u=(fs(Bm) - fs(Sm)))
@@ -267,6 +278,8 @@ def _body_sheet(p, body, dwg_no, size, k):
     t = _fit_text(2 * bar_bore.r, BORE_FIT)
     kp = sh.diameter_dim(fs(Bm), k * bar_bore.r, [-50, 50, -130, 130, -30, 30], t[0] + " ※", tol=t[1], outside=14, below=16)
     D.rec("bar_bore_d", 2 * bar_bore.r, p.bar_d, t[0], t[1])
+    bbx = body.bounding_box()                  # the bar clamp is the widest part in Y: the bore runs through it
+    D.rec("bar_bore_y_lo", y0 - bbx.min.Y, 0.0, ""); D.rec("bar_bore_y_hi", bbx.max.Y - y1, 0.0, "")
     sh.fcf(kp + (0, -7.5), ["cylindricity", "0.02"])
     sh.fcf(kp + (0, -14), ["perpendicularity", "φ0.05", "A"])
     a_r = math.radians(-120 if ang >= 0 else 120)
@@ -301,6 +314,13 @@ def _body_sheet(p, body, dwg_no, size, k):
             return min((math.hypot(c.loc[0] - o.loc[0], c.loc[2] - o.loc[2]) for o in others), default=float("inf"))
         D.each("pinch_cbore_coaxial", [xz_off(c, cbores) for c in pinch], 0.0, lambda v: "")
         D.each("pinch_tap_coaxial", [xz_off(c, ptaps) for c in pinch], 0.0, lambda v: "")
+        # each clearance hole is a continuous bolt path: from the slot face (+Y side) to its counterbore bottom
+        for i, c in enumerate(pinch):
+            h0, h1 = _span(c, (0, 1, 0))
+            mate = [o for o in cbores if xz_off(c, [o]) < 0.05]
+            sfx = "" if i == 0 else f"#{i + 1}"
+            D.rec("pinch_hole_from_slot" + sfx, h0 - (slot[-1] if len(slot) >= 2 else float("inf")), 0.0, "")
+            D.rec("pinch_hole_to_cbore" + sfx, (_span(mate[0], (0, 1, 0))[0] - h1) if mate else float("inf"), 0.0, "")
         cb_lo, cb_hi = cbores[0].axial_extent() if cbores else (0.0, 0.0)
         # every hole the 2x callouts cover, not just the first
         D.each("pinch_cbore_depth", [np.subtract(*c.axial_extent()[::-1]) for c in cbores] or [0.0], p.cbore_depth, _fmt)
@@ -351,6 +371,11 @@ def _body_sheet(p, body, dwg_no, size, k):
         D.rec("fp_thread_depth", fthr, stem.thread_depths(p)["faceplate"], _fmt(fthr))
         e0, e1 = taps[0].axial_extent()      # opens on the mating face, so the extent is the drill depth
         D.each("fp_tap_drill_depth", [np.subtract(*c.axial_extent()[::-1]) for c in taps], p.tap_depth, _fmt)
+        # blind tapped holes "on the mating face": each drill's open end lies on that face
+        mface = max(((f.area, z) for z, f, nn in planes(body, dv) if nn @ dv > 0 and abs(z - Bm @ dv) < 5),
+                    default=(0, float("inf")))[1]
+        for i, c in enumerate(taps):
+            D.rec("fp_tap_on_mating_face" + ("" if i == 0 else f"#{i + 1}"), mface - _span(c, dv)[1], 0.0, "")
         D.each("fp_tap_drill_d", [2 * c.r for c in taps], p.tap_drill_d, lambda v: f"φ{_fmt(v)}")
         sh.leader(aux.to_sheet(tr) + (1.2, 1.2), [(ab[1][0] + 4, ab[1][1] + 4), (ab[0][0] - 4, ab[1][1] + 4)], "",
                   lines=[f"4×M5×0.8 深さ{_fmt(fthr)}", f"  下穴φ{_fmt(2 * taps[0].r)} 深さ{_fmt(e1 - e0)}"])
@@ -579,6 +604,8 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     k = sh.diameter_dim(ss(Bm), scale * bore.r, [-35, 35, -50], t[0] + " ※", tol=t[1], outside=22, below=9)
     sh.fcf(k + (0, -7.5), ["cylindricity", "0.02"])
     D.rec("bar_bore_d", 2 * bore.r, p.bar_d, t[0], t[1])
+    fbx = fp.bounding_box()
+    D.rec("bar_bore_y_lo", y0 - fbx.min.Y, 0.0, ""); D.rec("bar_bore_y_hi", fbx.max.Y - y1, 0.0, "")
     top_n = max(ext_n)
     sh.dim(ss(Bm + nv * top_n), ss(Bm + nv * top_n + dv * t_front), 8, _fmt(t_front))
     D.rec("front_thickness", t_front, p.fp_front, _fmt(t_front))

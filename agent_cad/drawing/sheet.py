@@ -17,8 +17,9 @@ from build123d import Compound, Vector, Plane, Box, Shape, GeomType, Align
 A3 = (420.0, 297.0)
 # style -> (lineweight mm, linetype)
 STYLES = {
-    "outline": (0.5, "solid"), "hidden": (0.25, "dashed"), "center": (0.18, "dashdot"),
-    "thin": (0.18, "solid"), "cut": (0.5, "dashdot"), "frame": (0.7, "solid"), "hatch": (0.13, "solid"),
+    # JIS Z 8114 line group 0.5: thick 0.5, thin (dimension, leader, centre, hatching) 0.25
+    "outline": (0.5, "solid"), "hidden": (0.25, "dashed"), "center": (0.25, "dashdot"),
+    "thin": (0.25, "solid"), "cut": (0.5, "dashdot"), "frame": (0.7, "solid"), "hatch": (0.25, "solid"),
 }
 
 
