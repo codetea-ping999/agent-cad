@@ -397,3 +397,21 @@ def test_window_must_be_centred(monkeypatch):
     bad = {c["check"] for c in failed(rep)}
     assert "dim.window_center_y" in bad
     assert not bad & {"dim.window_w", "dim.window_h", "dim.window_r"}
+
+
+def test_faceplate_bore_and_lightening_bore_are_on_their_axes():
+    from agent_cad.drawing.measure import find_cyl
+    import numpy as np
+    p = CASES[0]
+    b, f = stem.build(p)
+    d, n, S, B = stem.frame(p)
+    dv, nv = np.array([d.X, d.Y, d.Z]), np.array([n.X, n.Y, n.Z])
+    good_f = {d_["name"]: d_ for d_ in stem_drawing.faceplate_sheet(p, f).meta["dims"]}
+    good_b = {d_["name"]: d_ for d_ in stem_drawing.body_sheet(p, b).meta["dims"]}
+    assert good_f["bar_bore_axis_offset"]["measured"] < 1e-3 and good_b["light_axis_offset"]["measured"] < 1e-3
+    bore = max((c for c in find_cyl(f, (0, 1, 0), inner=True) if c.r > 10), key=lambda c: c.r)
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.faceplate_sheet(p, _refill_and_move(f, bore, nv * 0.3))))}
+    assert "dim.bar_bore_axis_offset" in bad and "dim.bar_bore_d" not in bad
+    light = max((c for c in find_cyl(b, dv, inner=True) if c.r > p.tap_drill_d / 2 + 0.1), key=lambda c: c.r)
+    bad = {c["check"] for c in failed(check_sheet(stem_drawing.body_sheet(p, _refill_and_move(b, light, nv * 0.5))))}
+    assert "dim.light_axis_offset" in bad and "dim.light_d" not in bad
