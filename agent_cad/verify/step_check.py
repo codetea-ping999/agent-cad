@@ -132,6 +132,8 @@ def _inertia(shape, eps=1e-9):
 def _bbox(shape):
     b = Bnd_Box()
     BRepBndLib.AddOptimal_s(shape.wrapped, b, False, False)
+    if b.IsVoid():                        # empty import: no bounds to compare
+        return None
     lo, hi = b.CornerMin(), b.CornerMax()
     return np.array([lo.X(), lo.Y(), lo.Z(), hi.X(), hi.Y(), hi.Z()])
 
@@ -141,6 +143,7 @@ def _mesh_volume(shape, tol=0.02):
     if not v or not t:
         return None
     V = np.array([(p.X, p.Y, p.Z) for p in v]); T = np.array(t)
+    V -= V.mean(axis=0)                   # local origin: no cancellation for parts far from the global one
     a, b, c = V[T[:, 0]], V[T[:, 1]], V[T[:, 2]]
     return float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6.0)
 
@@ -225,7 +228,8 @@ def check_step(path, reference, assembly_name=None):
         # orientation: volume, area and centroid survive a rotation about the centroid; these do not
         I, I0 = _inertia(s), _inertia(ref.shape)
         di = float(np.abs(I - I0).max() / max(np.abs(I0).max(), 1e-12))
-        db = float(np.abs(_bbox(s) - _bbox(ref.shape)).max())
+        bb, bb0 = _bbox(s), _bbox(ref.shape)
+        db = float(np.abs(bb - bb0).max()) if bb is not None and bb0 is not None else float("inf")
         results.append(_check(f"{n}.geom.orientation", di <= INERTIA_REL_TOL and db <= BBOX_TOL_MM,
                               inertia_rel_err=round(di, 9), bbox_shift_mm=round(db, 6)))
         vp = rp.validation
