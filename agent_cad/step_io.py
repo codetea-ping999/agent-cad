@@ -225,7 +225,7 @@ def read_step(path):
                 c = gp_Pnt(*val["centroid"]).Transformed(loc.Transformation())
                 val["centroid"] = (c.X(), c.Y(), c.Z())
             # an occurrence may carry its own colour, overriding its definition's
-            parts.append(ReadPart(name(ref), Shape.cast(shp), occurrence_color(shp) or color(ref), val, *material(ref),
+            parts.append(ReadPart(name(ref), Shape.cast(shp), occurrence_color(shp) or color(comp) or color(ref), val, *material(ref),
                                   path=path))
 
     for i in range(1, free.Length() + 1):

@@ -343,3 +343,11 @@ def test_reversed_solid_mesh_volume(tmp_path):
     path = tmp_path / "rev.step"; write_step([PartSpec("R", r)], str(path))
     assert "R.mesh.volume" not in failed(check_step(str(path), [PartSpec("R", r)]))
 
+
+
+def test_loose_vertex_beside_the_solid_is_rejected():
+    from build123d import Box, Compound, Vertex
+    from agent_cad.verify.step_check import _stray
+    b = Box(10, 10, 10)
+    assert _stray(b.wrapped) == 0
+    assert _stray(Compound([b, Vertex(0, 0, 0)]).wrapped) == 1
