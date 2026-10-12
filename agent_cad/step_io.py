@@ -84,16 +84,18 @@ def write_step(parts, path, assembly_name=None, author="agent-cad", organization
     if len(parts) > 1 or assembly_name:
         asm = st.NewShape()
         TDataStd_Name.Set_s(asm, TCollection_ExtendedString(assembly_name or DEFAULT_ASSEMBLY))
-    labels = []
+    labels, comp = [], [None] * len(parts)
     for defn, idx in definitions(parts):
         shp = defn.shape.wrapped
         if any(shp.IsSame(d.shape.wrapped) for d, _ in labels):
             # same B-rep, different metadata: AddShape would reuse (and overwrite) the label
             from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
             shp = BRepBuilderAPI_Copy(shp).Shape()
-        labels.append((defn, idx))
         ps = defn
         lab = st.AddShape(shp, False)
+        labels.append((defn, lab))
+        for i in idx:
+            comp[i] = lab
         TDataStd_Name.Set_s(lab, TCollection_ExtendedString(ps.name))
         r, g, b = ps.color
         ct.SetColor(lab, Quantity_Color(r, g, b, Quantity_TOC_RGB), XCAFDoc_ColorType.XCAFDoc_ColorSurf)
@@ -106,9 +108,9 @@ def write_step(parts, path, assembly_name=None, author="agent-cad", organization
             m = mt.AddMaterial(h(ps.material), h(ps.material), ps.density_g_cm3,  # written as g/cm3
                                h("density"), h("POSITIVE_RATIO_MEASURE"))
             mt.SetMaterial(lab, m)
-        if asm is not None:
-            for _ in idx:                     # one component per occurrence of this definition
-                st.AddComponent(asm, lab, TopLoc_Location())
+    if asm is not None:
+        for lab in comp:                      # one component per part, in the caller's order
+            st.AddComponent(asm, lab, TopLoc_Location())
     st.UpdateAssemblies()
     w = STEPCAFControl_Writer()  # constructor initialises the STEP statics; set ours afterwards
     Interface_Static.SetIVal_s("write.step.schema", AP242)

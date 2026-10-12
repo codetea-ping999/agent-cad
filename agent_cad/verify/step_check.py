@@ -24,6 +24,10 @@ from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds, ShapeAnalysis_ShapeToler
 from OCP.TopAbs import TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE
 from OCP.GCPnts import GCPnts_AbscissaPoint
 from OCP.BRepAdaptor import BRepAdaptor_Curve
+from OCP.GProp import GProp_GProps
+from OCP.BRepGProp import BRepGProp
+from OCP.Bnd import Bnd_Box
+from OCP.BRepBndLib import BRepBndLib
 from build123d import Shape
 from ..step_io import read_step, write_step, PartSpec, mass_props, DEFAULT_ASSEMBLY, definitions
 
@@ -31,6 +35,8 @@ from ..step_io import read_step, write_step, PartSpec, mass_props, DEFAULT_ASSEM
 # below its "sharpness"/merging tolerance avoid healing on import.
 REL_TOL = 1e-5            # mass-property agreement (relative)
 CENTROID_TOL_MM = 1e-3
+INERTIA_REL_TOL = 1e-5     # inertia tensor about the centroid, relative to its largest entry
+BBOX_TOL_MM = 1e-3
 MESH_REL_TOL = 5e-3       # triangulation volume vs exact volume
 MAX_GEOM_TOL_MM = 1e-2    # largest vertex/edge tolerance allowed
 MIN_EDGE_MM = 1e-2        # shortest edge allowed (>> CATIA 0.001 mm resolution)
@@ -114,6 +120,22 @@ def _mass(shape):
     return v, a, (c.X(), c.Y(), c.Z())
 
 
+def _inertia(shape, eps=1e-9):
+    """Inertia tensor about the centroid, in model axes (unit density).
+    Unlike volume/area/centroid it changes when the part is rotated."""
+    g = GProp_GProps()
+    BRepGProp.VolumeProperties_s(shape.wrapped, g, Eps=eps)
+    m = g.MatrixOfInertia()
+    return np.array([[m.Value(i, j) for j in (1, 2, 3)] for i in (1, 2, 3)])
+
+
+def _bbox(shape):
+    b = Bnd_Box()
+    BRepBndLib.AddOptimal_s(shape.wrapped, b, False, False)
+    lo, hi = b.CornerMin(), b.CornerMax()
+    return np.array([lo.X(), lo.Y(), lo.Z(), hi.X(), hi.Y(), hi.Z()])
+
+
 def _mesh_volume(shape, tol=0.02):
     v, t = shape.tessellate(tol, 0.1)
     if not v or not t:
@@ -162,7 +184,11 @@ def check_step(path, reference, assembly_name=None):
     if assembly_name is None and len(reference) > 1:
         assembly_name = DEFAULT_ASSEMBLY
     results, types = text_checks(path)
-    asm, parts = read_step(path)
+    try:
+        asm, parts = read_step(path)
+    except IOError as ex:                 # unreadable file: a failed report, not an exception
+        results.append(_check("struct.import", False, error=str(ex)))
+        return {"file": os.path.basename(path), "pass": False, "checks": results}
     by_name = {}
     for p in parts:                       # every instance kept: duplicates are paired in file order
         by_name.setdefault(p.name, []).append(p)
@@ -196,6 +222,12 @@ def check_step(path, reference, assembly_name=None):
         results.append(_check(f"{n}.geom.vs_reference", _close(v, v0) and _close(a, a0) and dc < CENTROID_TOL_MM,
                               volume_mm3=round(v, 3), ref_volume_mm3=round(v0, 3),
                               area_mm2=round(a, 3), ref_area_mm2=round(a0, 3), centroid_shift_mm=round(dc, 6)))
+        # orientation: volume, area and centroid survive a rotation about the centroid; these do not
+        I, I0 = _inertia(s), _inertia(ref.shape)
+        di = float(np.abs(I - I0).max() / max(np.abs(I0).max(), 1e-12))
+        db = float(np.abs(_bbox(s) - _bbox(ref.shape)).max())
+        results.append(_check(f"{n}.geom.orientation", di <= INERTIA_REL_TOL and db <= BBOX_TOL_MM,
+                              inertia_rel_err=round(di, 9), bbox_shift_mm=round(db, 6)))
         vp = rp.validation
         lacking = [k for k in ("volume", "area", "centroid") if k not in vp]
         if not lacking:
