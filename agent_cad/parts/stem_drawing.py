@@ -193,7 +193,8 @@ def _body_sheet(p, body, dwg_no, size, k):
                 key=lambda c: (-round(np.subtract(*c.axial_extent()[::-1]), 3), off_axis(c)), default=None)
     D.need("light_bore", light is not None, 1)
     pinch = sorted(find_cyl(body, (0, 1, 0), r=p.bolt_clear_d / 2, inner=True), key=lambda c: c.loc[2])
-    taps = find_cyl(body, dv, r=p.tap_drill_d / 2, inner=True)
+    # faceplate taps: off the stem axis (a lightening bore of the tap drill size lies on it)
+    taps = [c for c in find_cyl(body, dv, r=p.tap_drill_d / 2, inner=True) if off_axis(c) > 1.0]
     cbores = find_cyl(body, (0, 1, 0), r=p.cbore_d / 2, inner=True)
     # slot side faces: Y planes across the clamp wall behind the bore (the probe line x = xm),
     # not, say, the bottom of a blind pinch hole
@@ -278,8 +279,14 @@ def _body_sheet(p, body, dwg_no, size, k):
     t = _fit_text(2 * bar_bore.r, BORE_FIT)
     kp = sh.diameter_dim(fs(Bm), k * bar_bore.r, [-50, 50, -130, 130, -30, 30], t[0] + " ※", tol=t[1], outside=14, below=16)
     D.rec("bar_bore_d", 2 * bar_bore.r, p.bar_d, t[0], t[1])
-    bbx = body.bounding_box()                  # the bar clamp is the widest part in Y: the bore runs through it
-    D.rec("bar_bore_y_lo", y0 - bbx.min.Y, 0.0, ""); D.rec("bar_bore_y_hi", bbx.max.Y - y1, 0.0, "")
+    # the bore runs through the bar clamp: compare with the clamp's own outer cylinder
+    # (pinch ears elsewhere may be wider), the whole body only if it is not found
+    bar_out = max(find_cyl(body, (0, 1, 0), inner=False, near=Bm), key=lambda c: c.r, default=None)
+    if bar_out is not None:
+        cy0, cy1 = bar_out.axial_extent()
+    else:
+        bbx = body.bounding_box(); cy0, cy1 = bbx.min.Y, bbx.max.Y
+    D.rec("bar_bore_y_lo", y0 - cy0, 0.0, ""); D.rec("bar_bore_y_hi", cy1 - y1, 0.0, "")
     sh.fcf(kp + (0, -7.5), ["cylindricity", "0.02"])
     sh.fcf(kp + (0, -14), ["perpendicularity", "φ0.05", "A"])
     a_r = math.radians(-120 if ang >= 0 else 120)
@@ -299,6 +306,11 @@ def _body_sheet(p, body, dwg_no, size, k):
         # drawn on the stem centreline Sm-Bm: the axis must lie on it
         rel = light.loc - Sm
         D.rec("light_axis_offset", np.linalg.norm(rel - (rel @ dv) * dv), 0.0, "")
+        # and it runs the whole body, from the steerer bore into the bar bore
+        from build123d import Compound
+        lf = Compound(light.faces)
+        D.rec("light_to_steerer_bore", lf.distance_to(Compound(st_bore.faces)), 0.0, "")
+        D.rec("light_to_bar_bore", lf.distance_to(Compound(bar_bore.faces)), 0.0, "")
     if len(pinch) == 2:
         pz = pinch[1].loc[2] - pinch[0].loc[2]
         bx = pinch[0].loc[0]
