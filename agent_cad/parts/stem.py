@@ -134,8 +134,8 @@ def build(p: StemParams):
         part -= side * Cylinder(p.cbore_d / 2, 2 * p.cbore_depth)                      # counterbore
         part -= Plane(origin=(bx, p.slot_w / 2 - 0.01, z), z_dir=(0, 1, 0)) * Cylinder(
             p.bolt_clear_d / 2, p.ear_half_w, align=(Align.CENTER, Align.CENTER, Align.MIN))  # clearance
-        part -= Plane(origin=(bx, 0.01, z), z_dir=(0, -1, 0)) * Cylinder(
-            p.tap_drill_d / 2, p.ear_half_w, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        part -= Plane(origin=(bx, 0.01, z), z_dir=(0, -1, 0)) * Cylinder(   # through the -Y ear
+            p.tap_drill_d / 2, p.ear_half_w + 1, align=(Align.CENTER, Align.CENTER, Align.MIN))
     # --- split faceplate
     big = 400
     front = bar_pl * Pos(big / 2 + p.fp_gap / 2, 0, 0) * Box(big, big, big)

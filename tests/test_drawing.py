@@ -189,3 +189,23 @@ def test_dxf_uses_the_selected_font(tmp_path):
     sh = stem_drawing.faceplate_sheet(p, stem.build(p)[1])
     to_dxf(sh, tmp_path / "f.dxf")
     assert ezdxf.readfile(tmp_path / "f.dxf").styles.get("JP").dxf.font == render._font_file()
+
+
+def test_drawing_numbers_do_not_collide_on_reported_pair():
+    a = stem.StemParams(length=80.3, angle_deg=-8.3)
+    b = stem.StemParams(length=81.7, angle_deg=-4.4)
+    assert stem_drawing.doc_no(a) != stem_drawing.doc_no(b)
+
+
+def test_bolt_pattern_needs_all_four_corners():
+    ok = [(-12.5, -20.2), (12.5, -20.2), (-12.5, 20.2), (12.5, 20.2)]
+    moved = ok[:3] + [(5.0, 10.0)]                      # spans unchanged, one hole inside the rectangle
+    assert stem_drawing._corners(ok, 12.5, 20.2) == 4
+    assert stem_drawing._corners(moved, 12.5, 20.2) == 3
+
+
+def test_pinch_taps_are_measured():
+    p = stem.StemParams()
+    dims = {d["name"]: d for d in stem_drawing.body_sheet(p, stem.build(p)[0]).meta["dims"]}
+    assert abs(dims["pinch_tap_drill_d"]["measured"] - p.tap_drill_d) < 1e-3
+    assert abs(dims["pinch_tap_length"]["measured"] - (p.ear_half_w - p.slot_w / 2)) < 1e-3   # drilled through

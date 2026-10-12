@@ -86,7 +86,7 @@ def _title(sh, p, part_name, dwg_no, mass_g, scale="1:1"):
 def doc_no(p):
     """Drawing-number stem unique to a parameter set: variants that differ in any
     parameter (size, angle, material...) never share a document identifier."""
-    h = hashlib.sha1(json.dumps(stem.asdict(p), sort_keys=True, default=str).encode()).hexdigest()[:6].upper()
+    h = hashlib.sha1(json.dumps(stem.asdict(p), sort_keys=True, default=str).encode()).hexdigest()[:12].upper()
     return f"AC-STEM-{h}"
 
 
@@ -127,6 +127,10 @@ def body_sheet(p: stem.StemParams, body, faceplate=None, dwg_no=None):
     slot_w = slot[-1] - slot[0] if len(slot) >= 2 else float("nan")
     D.need("pinch_holes", len(pinch), 2); D.need("pinch_cbores", len(cbores), 2)
     D.need("fp_taps", len(taps), 4); D.need("slot", 0 if math.isnan(slot_w) else 1, 1)
+    ptaps = find_cyl(body, (0, 1, 0), r=p.tap_drill_d / 2, inner=True)     # pinch threads, -Y ear
+    D.need("pinch_taps", len(ptaps), 2)
+    D.need("fp_tap_pattern", _corners([((c.loc - Bm) @ np.array([0, 1, 0]), (c.loc - Bm) @ nv) for c in taps],
+                                      p.fp_bolt_w, p.fp_bolt_off), 4)
 
     # ---- views (third angle): left | front section A-A | aux B ; top above front
     def mk():
@@ -208,11 +212,15 @@ def body_sheet(p: stem.StemParams, body, faceplate=None, dwg_no=None):
         D.rec("pinch_clear_d", 2 * pinch[0].r, p.bolt_clear_d, f"φ{_fmt(2 * pinch[0].r)}")
         if cbores:
             D.rec("pinch_cbore_d", 2 * cbores[0].r, p.cbore_d, f"φ{_fmt(2 * cbores[0].r)}")
+        pt_lo, pt_hi = ptaps[0].axial_extent() if ptaps else (0.0, 0.0)
+        if ptaps:
+            D.rec("pinch_tap_drill_d", 2 * ptaps[0].r, p.tap_drill_d, f"φ{_fmt(2 * ptaps[0].r)}")
+            D.rec("pinch_tap_length", pt_hi - pt_lo, p.ear_half_w - p.slot_w / 2, _fmt(pt_hi - pt_lo))
         lb = left.bbox()
         sh.leader(fs(pinch[0].loc - (0, 0, pinch[0].r * 0.7)),
                   [lb[0] + (-4, -12), lb[0] + (-4, -22), (lb[0][0] - 4, lb[1][1] + 26)], "", right=True,
                   lines=[f"2×φ{_fmt(2 * pinch[0].r)} キリ", f"  φ{_fmt(2 * cbores[0].r) if cbores else '-'} 深ザグリ 深さ{_fmt(cb_hi - cb_lo)} (+Y側)",
-                         f"  反対側 M5×0.8 深さ{_fmt(math.floor((p.ear_half_w - p.slot_w / 2 - 1) * 2) / 2)} (下穴φ{_fmt(p.tap_drill_d)})"])
+                         f"  反対側 M5×0.8 深さ{_fmt(math.floor((pt_hi - pt_lo - 1) * 2) / 2)} (下穴φ{_fmt(2 * ptaps[0].r) if ptaps else '-'})"])
     # GD&T on the steerer bore, datum A = steerer bore
     sh.datum(fs((st_bore.r, 0, z0)) + (0, -15), (0, -1), "A", length=5)
     sh.fcf(fs((-st_bore.r, 0, z0)) + (0, -24), ["cylindricity", "0.02"])
@@ -337,6 +345,14 @@ def _body_sections(sh, D, p, body, Sm, dv, cuts):
         D.rec(f"section_{lab}_w", ww, wi, _fmt(ww)); D.rec(f"section_{lab}_h", hh, hi, _fmt(hh))
 
 
+def _corners(pts, w, h, tol=0.01):
+    """How many of the four pattern positions (±w, ±h) hold a hole axis; a hole
+    off the rectangle, or two at one corner, leaves the count below four."""
+    hit = {(sy, sn) for y, n in pts for sy in (-1, 1) for sn in (-1, 1)
+           if abs(y - sy * w) < tol and abs(n - sn * h) < tol}
+    return len(hit) if len(pts) == 4 else 0
+
+
 def _pts(e, n=24):
     return [np.array(tuple(e.position_at(k / n))) for k in range(n + 1)]
 
@@ -454,6 +470,7 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     for c in holes:
         sh.center_mark(fs(c.loc), scale * c.r, 2)
     D.need("bolt_holes", len(holes), 4); D.need("cbores", len(cb), 4)
+    D.need("bolt_pattern", _corners([(c.loc[1] - Bm[1], (c.loc - Bm) @ nv) for c in holes], p.fp_bolt_w, p.fp_bolt_off), 4)
     if holes:
         D.rec("bolt_clear_d", 2 * holes[0].r, p.bolt_clear_d, f"φ{_fmt(2 * holes[0].r)}")
     if cb:
