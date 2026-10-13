@@ -693,7 +693,7 @@ def test_wide_slot_is_recognised_and_bores_and_taps_are_clear_over_their_full_se
 
 # default model's (body volume, faceplate volume) for each geometry revision: a change to
 # stem.build() that moves these must bump stem.GEOMETRY_REV, so the document number changes
-GEOMETRY_FINGERPRINT = {1: (38091.9, 7422.8)}
+GEOMETRY_FINGERPRINT = {1: (38091.9, 7422.8), 2: (38188.3, 7422.8)}
 
 
 def test_document_number_follows_the_geometry_revision(monkeypatch):
