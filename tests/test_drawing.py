@@ -727,3 +727,27 @@ def test_every_hole_is_clear_over_its_full_section():
     fr = Pos(*(np.array([B.X, 0, B.Z]) + dv * (p.bar_d / 2 - 0.4))) * Box(0.8, 0.6, 0.8)
     bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + fr)))}
     assert "dim.bar_bore_clear" in bad, bad
+
+
+def test_overcut_bores_are_rejected():
+    """A groove cut outward from the steerer bore, the bar bore (body half) or the faceplate's
+    bar bore leaves the merged wall's radius and extent unchanged: reported as overcut."""
+    import numpy as np
+    from build123d import Box, Pos
+    p = CASES[0]
+    b, f = stem.build(p)
+    d, n, S, B = stem.frame(p)
+    dv = np.array([d.X, d.Y, d.Z])
+    r = p.steerer_d / 2
+    # steerer: a groove on the +Y side, away from the slot (behind) and the lightening bore (ahead)
+    g_st = Pos(0, r, S.Z) * Box(3.0, 1.0, 4.0)
+    # bar bore: off the lightening bore (body) and the window (faceplate), within the clamp width
+    g_bar = Pos(*(np.array([B.X, 13.0, B.Z]) - dv * (p.bar_d / 2))) * Box(1.0, 3.0, 1.0)
+    cases = [("body", b - g_st, "dim.steerer_bore_overcut_mm3"),
+             ("body", b - g_bar, "dim.bar_bore_overcut_mm3")]
+    for _, shape, check in cases:
+        bad = {x["check"] for x in failed(check_sheet(stem_drawing.body_sheet(p, shape)))}
+        assert check in bad, (check, bad)
+    g_fp = Pos(*(np.array([B.X, 13.0, B.Z]) + dv * (p.bar_d / 2))) * Box(1.0, 3.0, 1.0)
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f - g_fp)))}
+    assert "dim.bar_bore_overcut_mm3" in bad, bad
