@@ -145,9 +145,11 @@ def _scale_text(k):
 
 
 def doc_no(p):
-    """Drawing-number stem unique to a parameter set: variants that differ in any
-    parameter (size, angle, material...) never share a document identifier."""
-    h = hashlib.sha1(json.dumps(stem.asdict(p), sort_keys=True, default=str).encode()).hexdigest()[:12].upper()
+    """Drawing-number stem unique to a parameter set and to the geometry revision of the
+    model code: variants that differ in any parameter (size, angle, material...), or the
+    same parameters built by changed geometry code, never share a document identifier."""
+    key = dict(stem.asdict(p), _geometry_rev=stem.GEOMETRY_REV)
+    h = hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode()).hexdigest()[:12].upper()
     return f"AC-STEM-{h}"
 
 
@@ -224,8 +226,10 @@ def _body_sheet(p, body, dwg_no, size, k):
     # slot side faces: Y planes across the clamp wall behind the bore (the probe line x = xm),
     # not, say, the bottom of a blind pinch hole
     xm = -(st_bore.r + st_out.r) / 2
-    slot_faces = [(y, f) for y, f, _ in planes(body, (0, 1, 0))
-                  if abs(f.center().Y) < 5 and f.bounding_box().min.X <= xm <= f.bounding_box().max.X]
+    # (facing the gap, i.e. towards Y = 0, and inside the ears: the ears' outer faces face away)
+    slot_faces = [(y, f) for y, f, nn in planes(body, (0, 1, 0))
+                  if abs(y) < p.ear_half_w - 1e-6 and nn[1] * y < 0
+                  and f.bounding_box().min.X <= xm <= f.bounding_box().max.X]
     slot = sorted({round(y, 6) for y, _ in slot_faces})
     slot_w = slot[-1] - slot[0] if len(slot) >= 2 else float("nan")
     if len(slot) >= 2:                   # the split is symmetric about the stem plane (Y = 0)
@@ -297,6 +301,8 @@ def _body_sheet(p, body, dwg_no, size, k):
     D.rec("steerer_bore_d", 2 * st_bore.r, p.steerer_d, t[0], t[1])
     sb0, sb1 = _span(st_bore, (0, 0, 1))      # no depth on the callout: through the clamp, z0..z1
     D.rec("steerer_bore_bottom", sb0 - z0, 0.0, ""); D.rec("steerer_bore_top", z1 - sb1, 0.0, "")
+    # the whole nominal bore is free of material (a rib inside it leaves the wall radius intact)
+    D.rec("steerer_bore_clear", _material_in(body, (0, 0, z0 - 1), (0, 0, z1 + 1), st_bore.r - 1e-3), 0.0, "")
     sh.dim(fs((-st_out.r, 0, z0)), fs((-st_out.r, 0, z1)), 22, _fmt(z1 - z0))
     D.rec("stack_h", z1 - z0, p.stack_h, _fmt(z1 - z0))
     sh.dim(fs(Sm), fs(Bm), 38 if ang >= 0 else -38, _fmt(L), u=(fs(Bm) - fs(Sm)))
@@ -317,6 +323,7 @@ def _body_sheet(p, body, dwg_no, size, k):
     else:
         bbx = body.bounding_box(); cy0, cy1 = bbx.min.Y, bbx.max.Y
     D.rec("bar_bore_y_lo", y0 - cy0, 0.0, ""); D.rec("bar_bore_y_hi", cy1 - y1, 0.0, "")
+    D.rec("bar_bore_clear", _material_in(body, (Bm[0], cy0 - 1, Bm[2]), (Bm[0], cy1 + 1, Bm[2]), bar_bore.r - 1e-3), 0.0, "")
     sh.fcf(kp + (0, -7.5), ["cylindricity", "0.02"])
     sh.fcf(kp + (0, -14), ["perpendicularity", "φ0.05", "A"])
     a_r = math.radians(-120 if ang >= 0 else 120)
@@ -435,6 +442,11 @@ def _body_sheet(p, body, dwg_no, size, k):
         mface = max((z for z, f, nn in planes(body, dv) if nn @ dv > 0), default=float("inf"))
         for i, c in enumerate(taps):
             D.rec("fp_tap_on_mating_face" + ("" if i == 0 else f"#{i + 1}"), mface - _span(c, dv)[1], 0.0, "")
+        # and each drill is clear over its whole section, from its bottom out past the mating face
+        def on_tap(c, t):
+            return c.loc + dv * (t - c.loc @ dv)
+        D.each("fp_tap_open", [_material_in(body, on_tap(c, _span(c, dv)[0] + 0.3), on_tap(c, _span(c, dv)[1] + 1.0),
+                                            c.r - 1e-3) for c in taps], 0.0, lambda v: "")
         D.each("fp_tap_drill_d", [2 * c.r for c in taps], p.tap_drill_d, lambda v: f"φ{_fmt(v)}")
         D.each("fp_tap_drill_vs_M5", [stem.m5_drill_excess(2 * c.r) for c in taps], 0.0, lambda v: "")
         sh.leader(aux.to_sheet(tr) + (1.2, 1.2), [(ab[1][0] + 4, ab[1][1] + 4), (ab[0][0] - 4, ab[1][1] + 4)], "",

@@ -663,3 +663,43 @@ def test_holes_are_clear_over_their_full_section_and_taps_fit_m5():
     assert not stem.checks(q, bq, fq)["tap_drill_fits_M5"]
     bad = {x["check"] for x in failed(check_sheet(stem_drawing.body_sheet(q, bq)))}
     assert any(x.startswith("dim.fp_tap_drill_vs_M5") for x in bad) and any(x.startswith("dim.pinch_tap_drill_vs_M5") for x in bad)
+
+
+def test_wide_slot_is_recognised_and_bores_and_taps_are_clear_over_their_full_section():
+    """A slot wider than 10 mm on wide ears is still found. A partial rib inside the steerer
+    bore, the bar bore or a faceplate tap drill (wall radius and extent unchanged) is reported."""
+    import dataclasses
+    import numpy as np
+    from build123d import Box, Plane, Pos, Vector
+    from agent_cad.drawing.measure import find_cyl
+    w = dataclasses.replace(CASES[0], ear_half_w=20.0, slot_w=12.0)
+    bw, _ = stem.build(w)
+    assert check_sheet(stem_drawing.body_sheet(w, bw))["pass"]
+    p = CASES[0]
+    b, _ = stem.build(p)
+    d, n, S, B = stem.frame(p)
+    dv = np.array([d.X, d.Y, d.Z])
+    r = p.steerer_d / 2
+    ribs = {"dim.steerer_bore_clear": Pos(-(r - 0.4), 0, S.Z) * Box(0.8, 0.6, 0.6),
+            "dim.bar_bore_clear": Pos(*(np.array([B.X, 0, B.Z]) - dv * (p.bar_d / 2 - 0.4))) * Box(0.8, 0.6, 0.8)}
+    t = [c for c in find_cyl(b, dv, r=p.tap_drill_d / 2, inner=True)][0]
+    mid = t.loc + dv * (np.mean(t.axial_extent()) * np.sign(t.axis @ dv) - t.loc @ dv)
+    ribs["dim.fp_tap_open"] = Plane(origin=Vector(*mid), z_dir=Vector(*dv), x_dir=Vector(0, 1, 0)) * \
+        Pos(t.r - 0.3, 0, 0) * Box(0.6, 0.5, 0.5)
+    for check, rib in ribs.items():
+        bad = {x["check"] for x in failed(check_sheet(stem_drawing.body_sheet(p, b + rib)))}
+        assert any(x.startswith(check) for x in bad), (check, bad)
+
+
+# default model's (body volume, faceplate volume) for each geometry revision: a change to
+# stem.build() that moves these must bump stem.GEOMETRY_REV, so the document number changes
+GEOMETRY_FINGERPRINT = {1: (38091.9, 7422.8)}
+
+
+def test_document_number_follows_the_geometry_revision(monkeypatch):
+    p = stem.StemParams()
+    b, f = stem.build(p)
+    assert GEOMETRY_FINGERPRINT[stem.GEOMETRY_REV] == (round(b.volume, 1), round(f.volume, 1))
+    before = stem_drawing.doc_no(p)
+    monkeypatch.setattr(stem, "GEOMETRY_REV", stem.GEOMETRY_REV + 1)
+    assert stem_drawing.doc_no(p) != before
