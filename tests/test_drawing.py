@@ -703,3 +703,27 @@ def test_document_number_follows_the_geometry_revision(monkeypatch):
     before = stem_drawing.doc_no(p)
     monkeypatch.setattr(stem, "GEOMETRY_REV", stem.GEOMETRY_REV + 1)
     assert stem_drawing.doc_no(p) != before
+
+
+def test_every_hole_is_clear_over_its_full_section():
+    """Partial ribs that leave the wall radius and extent intact: inside the lightening bore,
+    a pinch counterbore (body) and the faceplate half of the bar bore."""
+    import numpy as np
+    from build123d import Box, Pos
+    from agent_cad.drawing.measure import find_cyl
+    p = CASES[0]
+    b, f = stem.build(p)
+    d, n, S, B = stem.frame(p)
+    dv, nv = np.array([d.X, d.Y, d.Z]), np.array([n.X, n.Y, n.Z])
+    S_, B_ = np.array([S.X, S.Y, S.Z]), np.array([B.X, B.Y, B.Z])
+    mid = (S_ + B_) / 2
+    light = Pos(*(mid + nv * (p.light_d / 2 - 0.3))) * Box(0.6, 0.6, 0.6)
+    cb = [c for c in find_cyl(b, (0, 1, 0), r=p.cbore_d / 2, inner=True) if c.loc[0] < 0][0]
+    y_floor = min(np.array(cb.axial_extent()) * np.sign(cb.axis[1]))
+    ledge = Pos(cb.loc[0] + cb.r - 0.4, y_floor + 0.3, cb.loc[2]) * Box(0.8, 0.6, 0.8)
+    for check, rib in (("dim.light_bore_clear", light), ("dim.pinch_cbore_open", ledge)):
+        bad = {x["check"] for x in failed(check_sheet(stem_drawing.body_sheet(p, b + rib)))}
+        assert any(x.startswith(check) for x in bad), (check, bad)
+    fr = Pos(*(np.array([B.X, 0, B.Z]) + dv * (p.bar_d / 2 - 0.4))) * Box(0.8, 0.6, 0.8)
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + fr)))}
+    assert "dim.bar_bore_clear" in bad, bad
