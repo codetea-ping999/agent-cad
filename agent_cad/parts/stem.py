@@ -221,6 +221,7 @@ def checks(p, body_part, faceplate):
         "body_top_around_lightening": round((min(p.body_h, he) - p.light_d) / 2, 2),
     }
     res["thread_engagement_mm"] = thread_depths(p)      # the usable depths the drawing calls out
+    res["tap_drill_fits_M5"] = m5_drill_excess(p.tap_drill_d) == 0
     mass = (body_part.volume + faceplate.volume) / 1000 * rho
     res["mass_g"] = {"body": round(body_part.volume / 1000 * rho, 1), "faceplate": round(faceplate.volume / 1000 * rho, 1), "total_excl_bolts": round(mass, 1)}
     MIN_WALL = 1.5
@@ -228,8 +229,19 @@ def checks(p, body_part, faceplate):
                        and all(v == 0 for v in res["interference_mm3"].values())
                        and min(res["min_wall_mm"].values()) >= MIN_WALL
                        and min(res["thread_engagement_mm"].values()) >= 1.5 * 5
+                       and res["tap_drill_fits_M5"]
                        and mass <= p.mass_target_g)
     return res
+
+# the drawings call out M5x0.8 threads: the tap drill must lie in the M5 internal minor
+# diameter band (JIS B 0209-2, 6H: D1 4.134..4.334 mm)
+M5_DRILL = (4.134, 4.334)
+
+
+def m5_drill_excess(d):
+    """How far drill diameter d lies outside the M5 minor-diameter band (0 inside)."""
+    return max(0.0, M5_DRILL[0] - d, d - M5_DRILL[1])
+
 
 TAP_RUNOUT = 2.0       # blind tapped hole: incomplete thread at the drill bottom (plug tap)
 TAP_LEAD_IN = 1.0      # through tapped hole: entry chamfer and first incomplete turn
