@@ -348,6 +348,9 @@ def _body_sheet(p, body, dwg_no, size, k):
         lf = Compound(light.faces)
         D.rec("light_to_steerer_bore", lf.distance_to(Compound(st_bore.faces)), 0.0, "")
         D.rec("light_to_bar_bore", lf.distance_to(Compound(bar_bore.faces)), 0.0, "")
+        # and nothing obstructs it: its whole nominal section is clear from bore to bore
+        D.rec("light_bore_clear", _material_in(body, light.loc + dv * ((Sm - light.loc) @ dv),
+                                               light.loc + dv * ((Bm - light.loc) @ dv), light.r - 1e-3), 0.0, "")
     if len(pinch) == 2:
         pz = pinch[1].loc[2] - pinch[0].loc[2]
         bx = pinch[0].loc[0]
@@ -388,6 +391,10 @@ def _body_sheet(p, body, dwg_no, size, k):
         cb_lo, cb_hi = cbores[0].axial_extent() if cbores else (0.0, 0.0)
         # every hole the 2x callouts cover, not just the first
         D.each("pinch_cbore_depth", [np.subtract(*c.axial_extent()[::-1]) for c in cbores] or [0.0], p.cbore_depth, _fmt)
+        # each counterbore is clear over its whole section, from its floor out past the +Y face
+        D.each("pinch_cbore_open", [_material_in(body, (c.loc[0], _span(c, (0, 1, 0))[0] + 1e-3, c.loc[2]),
+                                                 (c.loc[0], _span(c, (0, 1, 0))[1] + 1.0, c.loc[2]), c.r - 1e-3)
+                                    for c in cbores], 0.0, lambda v: "")
         D.each("pinch_clear_d", [2 * c.r for c in pinch], p.bolt_clear_d, lambda v: f"φ{_fmt(v)}")
         D.each("pinch_cbore_d", [2 * c.r for c in cbores], p.cbore_d, lambda v: f"φ{_fmt(v)}")
         pt_lo, pt_hi = ptaps[0].axial_extent() if ptaps else (0.0, 0.0)
@@ -678,6 +685,7 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     D.rec("bar_bore_d", 2 * bore.r, p.bar_d, t[0], t[1])
     fbx = fp.bounding_box()
     D.rec("bar_bore_y_lo", y0 - fbx.min.Y, 0.0, ""); D.rec("bar_bore_y_hi", fbx.max.Y - y1, 0.0, "")
+    D.rec("bar_bore_clear", _material_in(fp, (Bm[0], fbx.min.Y - 1, Bm[2]), (Bm[0], fbx.max.Y + 1, Bm[2]), bore.r - 1e-3), 0.0, "")
     top_n = max(ext_n)
     sh.dim(ss(Bm + nv * top_n), ss(Bm + nv * top_n + dv * t_front), 8, _fmt(t_front))
     D.rec("front_thickness", t_front, p.fp_front, _fmt(t_front))
