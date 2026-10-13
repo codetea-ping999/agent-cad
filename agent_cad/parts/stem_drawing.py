@@ -78,6 +78,34 @@ def _material_in(shape, a, b, r):
     return (shape & cyl).volume
 
 
+def _overcut(shape, a, b, r, keep=None, allowed=(), t=0.5):
+    """Void just outside a bore: the volume of the ring r..r+t from a to b (inside `keep`,
+    the region the part should fill there) that `shape` leaves empty, less the openings
+    other drawn features legitimately cut into it. 0 when the bore wall is complete."""
+    from build123d import Cylinder, Plane, Align, Vector
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    pl = Plane(origin=Vector(*a), z_dir=Vector(*(b - a)))
+    h = float(np.linalg.norm(b - a))
+    ring = pl * Cylinder(r + t, h, align=(Align.CENTER, Align.CENTER, Align.MIN)) - \
+        pl * Cylinder(r, h, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    if keep is not None:
+        ring = ring & keep
+        if ring.volume < 1e-9:
+            return 0.0
+    void = ring - shape
+    for c in allowed:
+        if void.volume < 1e-9:            # nothing left: an empty compound cannot be cut further
+            break
+        void = void - c
+    return void.volume
+
+
+def _halfspace(point, normal, size=1000.0):
+    """A large box filling the side of the plane (point, normal) the normal points to."""
+    from build123d import Box, Plane, Align, Vector
+    return Plane(origin=Vector(*point), z_dir=Vector(*normal)) * Box(size, size, size, align=(Align.CENTER, Align.CENTER, Align.MIN))
+
+
 def _span(c, u):
     """(low, high) extent of cylinder c along the unit vector u, whichever way its axis points."""
     e = np.array(c.axial_extent()) * np.sign(c.axis @ np.asarray(u, float))
@@ -303,6 +331,19 @@ def _body_sheet(p, body, dwg_no, size, k):
     D.rec("steerer_bore_bottom", sb0 - z0, 0.0, ""); D.rec("steerer_bore_top", z1 - sb1, 0.0, "")
     # the whole nominal bore is free of material (a rib inside it leaves the wall radius intact)
     D.rec("steerer_bore_clear", _material_in(body, (0, 0, z0 - 1), (0, 0, z1 + 1), st_bore.r - 1e-3), 0.0, "")
+    # nor is it overcut: no void just outside the nominal wall but the slot and the lightening
+    # bore (a groove or pocket would leave the merged wall's radius and extent unchanged)
+    from build123d import Cylinder as _Cyl, Plane as _Pl, Align as _Al, Vector as _V, Box as _Box, Pos as _Pos
+    cut_light = [] if light is None else [
+        _Pl(origin=_V(*(light.loc + dv * ((Sm - light.loc) @ dv))), z_dir=_V(*dv)) *
+        _Cyl(light.r + 0.01, float(np.linalg.norm(Bm - Sm)), align=(_Al.CENTER, _Al.CENTER, _Al.MIN))]
+    cut_slot = []
+    if len(slot) >= 2:
+        bbs = body.bounding_box()
+        cut_slot = [_Pos((bbs.min.X - 1) / 2, (slot[0] + slot[-1]) / 2, (z0 + z1) / 2) *
+                    _Box(1 - bbs.min.X, slot[-1] - slot[0] + 0.02, z1 - z0 + 2)]
+    D.rec("steerer_bore_overcut_mm3", _overcut(body, (0, 0, z0 + 0.5), (0, 0, z1 - 0.5), st_bore.r,
+                                               allowed=cut_light + cut_slot), 0.0, "")
     sh.dim(fs((-st_out.r, 0, z0)), fs((-st_out.r, 0, z1)), 22, _fmt(z1 - z0))
     D.rec("stack_h", z1 - z0, p.stack_h, _fmt(z1 - z0))
     sh.dim(fs(Sm), fs(Bm), 38 if ang >= 0 else -38, _fmt(L), u=(fs(Bm) - fs(Sm)))
@@ -324,6 +365,11 @@ def _body_sheet(p, body, dwg_no, size, k):
         bbx = body.bounding_box(); cy0, cy1 = bbx.min.Y, bbx.max.Y
     D.rec("bar_bore_y_lo", y0 - cy0, 0.0, ""); D.rec("bar_bore_y_hi", cy1 - y1, 0.0, "")
     D.rec("bar_bore_clear", _material_in(body, (Bm[0], cy0 - 1, Bm[2]), (Bm[0], cy1 + 1, Bm[2]), bar_bore.r - 1e-3), 0.0, "")
+    # and not overcut where the body holds it (behind its mating face), but for the lightening bore
+    mf_b = max((z for z, f, nn in planes(body, dv) if nn @ dv > 0), default=Bm @ dv)
+    keep_b = _halfspace(Bm + dv * (mf_b - 0.01 - Bm @ dv), -dv)
+    D.rec("bar_bore_overcut_mm3", _overcut(body, (Bm[0], cy0 + 0.5, Bm[2]), (Bm[0], cy1 - 0.5, Bm[2]), bar_bore.r,
+                                           keep=keep_b, allowed=cut_light), 0.0, "")
     sh.fcf(kp + (0, -7.5), ["cylindricity", "0.02"])
     sh.fcf(kp + (0, -14), ["perpendicularity", "φ0.05", "A"])
     a_r = math.radians(-120 if ang >= 0 else 120)
@@ -792,6 +838,16 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
             pl = Plane(origin=Vector(*(c - dv * 100)), x_dir=Vector(0, 1, 0), z_dir=Vector(*dv))
             prof = stem._window_profile(dataclasses.replace(p, fp_window_w=ww - 2e-3, fp_window_h=wh - 2e-3))
             D.rec("window_material_mm3", (fp & extrude(pl * prof, 200)).volume, 0.0, "")
+    # the bar bore is not overcut where the faceplate holds it (in front of its mating face),
+    # but for the window
+    allowed = []
+    if win:
+        from build123d import Plane, Vector, extrude
+        c = Bm + np.array([0.0, 1.0, 0.0]) * wcy + nv * wcn
+        pl = Plane(origin=Vector(*(c - dv * 100)), x_dir=Vector(0, 1, 0), z_dir=Vector(*dv))
+        allowed = [extrude(pl * stem._window_profile(dataclasses.replace(p, fp_window_w=ww + 0.02, fp_window_h=wh + 0.02)), 200)]
+    D.rec("bar_bore_overcut_mm3", _overcut(fp, (Bm[0], y0 + 0.5, Bm[2]), (Bm[0], y1 - 0.5, Bm[2]), bore.r,
+                                           keep=_halfspace(Bm + dv * (t_back + 0.01), dv), allowed=allowed), 0.0, "")
     mass = fp.volume / 1000 * stem.density(p)
     _title(sh, p, "ステム フェイスプレート (FACEPLATE)", f"{dwg_no or doc_no(p)}-02", mass, scale=_scale_text(scale))
     _notes(sh, _common_notes(sh, p, [f"※ φ{_fmt(2 * bore.r)} は本体と組み付けた状態で仕上げる (共加工)。",
