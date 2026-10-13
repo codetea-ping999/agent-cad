@@ -106,6 +106,24 @@ def _halfspace(point, normal, size=1000.0):
     return Plane(origin=Vector(*point), z_dir=Vector(*normal)) * Box(size, size, size, align=(Align.CENTER, Align.CENTER, Align.MIN))
 
 
+_REF = {}
+
+
+def _reference(p):
+    """(body, faceplate) as stem.build() makes them for p (cached per parameter set)."""
+    key = json.dumps(stem.asdict(p), sort_keys=True, default=str) + f"|{stem.GEOMETRY_REV}"
+    if key not in _REF:
+        _REF[key] = stem.build(p)
+    return _REF[key]
+
+
+def _deviation(shape, ref):
+    """Volume of the symmetric difference: 0 when `shape` is exactly the reference solid.
+    Catches any local edit (a groove, notch, bridge, skin or pocket anywhere) that the
+    feature-by-feature probes, which explain *what* is wrong, might not each cover."""
+    return (shape - ref).volume + (ref - shape).volume
+
+
 def _span(c, u):
     """(low, high) extent of cylinder c along the unit vector u, whichever way its axis points."""
     e = np.array(c.axial_extent()) * np.sign(c.axis @ np.asarray(u, float))
@@ -216,6 +234,9 @@ def _body_sheet(p, body, dwg_no, size, k):
     dv, nv = np.array([d.X, d.Y, d.Z]), np.array([n.X, n.Y, n.Z])
     sh = Sheet(size); D = _Dims(sh)
     rho = stem.density(p)
+    # the sheet, and the same-number STEP model it delegates to, describe exactly the model
+    # stem.build() makes for p: any other geometry is not this drawing's part
+    D.rec("body_matches_model_mm3", _deviation(body, _reference(p)[0]), 0.0, "")
 
     # ---- measurements
     st_bore = max(find_cyl(body, (0, 0, 1), near=(0, 0, 0), inner=True), key=lambda c: c.r, default=None)
@@ -273,7 +294,9 @@ def _body_sheet(p, body, dwg_no, size, k):
         from build123d import Box, Pos
         bb_ = body.bounding_box()
         gap = slot[-1] - slot[0] - 2e-3
-        region = Pos((bb_.min.X - 1) / 2, (slot[0] + slot[-1]) / 2, (z0 + z1) / 2) * Box(1 - bb_.min.X, gap, z1 - z0)
+        # over the body's whole height: pinch bosses may stand proud of the clamp cylinder
+        region = Pos((bb_.min.X - 1) / 2, (slot[0] + slot[-1]) / 2, (bb_.min.Z + bb_.max.Z) / 2) * \
+            Box(1 - bb_.min.X, gap, bb_.max.Z - bb_.min.Z + 2)
         D.rec("slot_bridged_mm3", (body & region).volume, 0.0, "")
     D.need("pinch_holes", len(pinch), 2); D.need("pinch_cbores", len(cbores), 2)
     D.need("fp_taps", len(taps), 4); D.need("slot", 0 if math.isnan(slot_w) else 1, 1)
@@ -689,6 +712,7 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     dv, nv = np.array([d.X, d.Y, d.Z]), np.array([n.X, n.Y, n.Z])
     Bm = np.array([B.X, B.Y, B.Z])
     sh = Sheet(size); D = _Dims(sh)
+    D.rec("faceplate_matches_model_mm3", _deviation(fp, _reference(p)[1]), 0.0, "")
     kx, ky = size[0] / A3[0], size[1] / A3[1]
     bore = max(find_cyl(fp, (0, 1, 0), inner=True, near=tuple(Bm)), key=lambda c: c.r, default=None)
     if bore is None:
