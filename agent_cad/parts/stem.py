@@ -6,7 +6,7 @@ from build123d import *
 # Revision of the geometry this module builds. It is part of the drawing/STEP document
 # number, so bump it whenever build() returns a different shape for the same parameters
 # (tests/test_drawing.py pins the default model's fingerprint to this revision).
-GEOMETRY_REV = 1
+GEOMETRY_REV = 2   # 2: split-ear bosses overlap the clamp ring across their full width
 
 MATERIALS = {  # density g/cm3
     "A6061-T6": 2.70, "A7075-T6": 2.81, "A2014-T6": 2.80, "Ti-6Al-4V": 4.43,
@@ -80,7 +80,9 @@ def outer(p: StemParams):
     if p.ear_split:
         # one boss per pinch bolt; material between and above/below the bolts removed
         eb = p.cbore_d / 2 + p.ear_end_margin            # boss half height
-        x0 = rs_o - 2.0                                   # overlap into the clamp ring
+        # overlap into the clamp ring across the boss's full width: the ring curves away
+        # from a flat boss face, which otherwise leaves a hairline crevice at |y| -> ear_half_w
+        x0 = min(rs_o - 2.0, math.sqrt(max(rs_o ** 2 - p.ear_half_w ** 2, 0.0)) - 0.5)
         ear = Part()
         for z in (p.stack_h / 2 - p.pinch_pitch / 2, p.stack_h / 2 + p.pinch_pitch / 2):
             ear += Pos(-(x0 + ear_x) / 2, 0, z) * extrude(

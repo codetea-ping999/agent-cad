@@ -351,3 +351,18 @@ def test_loose_vertex_beside_the_solid_is_rejected():
     b = Box(10, 10, 10)
     assert _stray(b.wrapped) == 0
     assert _stray(Compound([b, Vertex(0, 0, 0)]).wrapped) == 1
+
+
+def test_tangent_seam_point_is_on_surface(tmp_path):
+    """A sample point on a tangent seam of the -17 deg body is called IN by the solid
+    classifier although it lies on the surface; the distance fallback settles it."""
+    from scripts.make_stem import CASES, part_specs
+    from agent_cad.parts import stem
+    from agent_cad.step_io import write_step
+    from agent_cad.verify.step_check import check_step
+    p = CASES["stem110_-17_7075"]
+    body, _ = part_specs(p, *stem.build(p))
+    path = tmp_path / "b.step"
+    write_step([body], path)
+    rep = check_step(path, [body], None)
+    assert rep["pass"], [c for c in rep["checks"] if not c["pass"]]
