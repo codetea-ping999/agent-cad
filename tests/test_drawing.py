@@ -635,3 +635,31 @@ def _hull_box(shape):
     from build123d import Box, Pos
     bb = shape.bounding_box()
     return Pos(*bb.center()) * Box(bb.size.X, bb.size.Y, bb.size.Z)
+
+
+def test_holes_are_clear_over_their_full_section_and_taps_fit_m5():
+    """A ledge at a counterbore bottom, a radial bridge in a clearance hole: reported. A tap
+    drill outside the M5 minor-diameter band fails the design check and the drawing."""
+    import dataclasses
+    import numpy as np
+    from build123d import Box, Cylinder, Plane, Pos, Align, Vector
+    from agent_cad.drawing.measure import find_cyl
+    p = CASES[0]
+    b, f = stem.build(p)
+    d, n, S, B = stem.frame(p)
+    dv = np.array([d.X, d.Y, d.Z])
+    c = find_cyl(f, dv, r=p.cbore_d / 2, inner=True)[0]
+    bot = c.loc + dv * (min(np.array(c.axial_extent()) * np.sign(c.axis @ dv)) - c.loc @ dv)
+    ledge = Plane(origin=Vector(*bot), z_dir=Vector(*dv), x_dir=Vector(0, 1, 0)) * Pos(c.r - 0.5, 0, 0.25) * Box(1.0, 1.0, 0.5)
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + ledge)))}
+    assert any(x.startswith("dim.cbore_open") for x in bad), bad
+    h = find_cyl(f, dv, r=p.bolt_clear_d / 2, inner=True)[0]
+    mid = h.loc + dv * (np.mean(h.axial_extent()) * np.sign(h.axis @ dv) - h.loc @ dv)
+    rib = Plane(origin=Vector(*mid), z_dir=Vector(*dv), x_dir=Vector(0, 1, 0)) * Pos(h.r - 0.4, 0, 0) * Box(0.8, 0.6, 0.6)
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f + rib)))}
+    assert any(x.startswith("dim.bolt_hole_clear") for x in bad), bad
+    q = dataclasses.replace(p, tap_drill_d=3.3)
+    bq, fq = stem.build(q)
+    assert not stem.checks(q, bq, fq)["tap_drill_fits_M5"]
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.body_sheet(q, bq)))}
+    assert any(x.startswith("dim.fp_tap_drill_vs_M5") for x in bad) and any(x.startswith("dim.pinch_tap_drill_vs_M5") for x in bad)

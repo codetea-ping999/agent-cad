@@ -363,15 +363,21 @@ def _body_sheet(p, body, dwg_no, size, k):
             sfx = "" if i == 0 else f"#{i + 1}"
             D.rec("pinch_hole_from_slot" + sfx, h0 - (slot[-1] if len(slot) >= 2 else float("inf")), 0.0, "")
             D.rec("pinch_hole_to_cbore" + sfx, (_span(mate[0], (0, 1, 0))[0] - h1) if mate else float("inf"), 0.0, "")
+            # and nothing obstructs the bolt anywhere along it: the hole's full section, from the
+            # slot to the counterbore bottom, holds no material
+            if mate and len(slot) >= 2:
+                D.rec("pinch_hole_clear" + sfx, _material_in(body, (c.loc[0], slot[-1] - 0.3, c.loc[2]),
+                                                           (c.loc[0], _span(mate[0], (0, 1, 0))[0] + 0.3, c.loc[2]),
+                                                           c.r - 1e-3), 0.0, "")
         # each thread runs from the slot face (-Y side) out through the -Y ear face
         from build123d import Edge
         for i, c in enumerate(ptaps):
             t0, t1 = _span(c, (0, 1, 0))
             sfx = "" if i == 0 else f"#{i + 1}"
             D.rec("pinch_tap_to_slot" + sfx, (slot[0] if len(slot) >= 2 else float("inf")) - t1, 0.0, "")
-            # opens: across the drill's whole section, from inside it out past its end, no material
-            D.rec("pinch_tap_open" + sfx, _material_in(body, (c.loc[0], (t0 + t1) / 2, c.loc[2]),
-                                                       (c.loc[0], t0 - 1.0, c.loc[2]), 0.98 * c.r), 0.0, "")
+            # clear and open: across the drill's whole section, from the slot out past its end, no material
+            D.rec("pinch_tap_open" + sfx, _material_in(body, (c.loc[0], t1 + 0.3, c.loc[2]),
+                                                       (c.loc[0], t0 - 1.0, c.loc[2]), c.r - 1e-3), 0.0, "")
         cb_lo, cb_hi = cbores[0].axial_extent() if cbores else (0.0, 0.0)
         # every hole the 2x callouts cover, not just the first
         D.each("pinch_cbore_depth", [np.subtract(*c.axial_extent()[::-1]) for c in cbores] or [0.0], p.cbore_depth, _fmt)
@@ -379,6 +385,7 @@ def _body_sheet(p, body, dwg_no, size, k):
         D.each("pinch_cbore_d", [2 * c.r for c in cbores], p.cbore_d, lambda v: f"φ{_fmt(v)}")
         pt_lo, pt_hi = ptaps[0].axial_extent() if ptaps else (0.0, 0.0)
         D.each("pinch_tap_drill_d", [2 * c.r for c in ptaps], p.tap_drill_d, lambda v: f"φ{_fmt(v)}")
+        D.each("pinch_tap_drill_vs_M5", [stem.m5_drill_excess(2 * c.r) for c in ptaps], 0.0, lambda v: "")
         D.each("pinch_tap_length", [np.subtract(*c.axial_extent()[::-1]) for c in ptaps], p.ear_half_w - p.slot_w / 2, _fmt)
         pthr = stem.usable_thread(pt_hi - pt_lo, through=True)
         D.rec("pinch_thread_depth", pthr, stem.thread_depths(p)["pinch"], _fmt(pthr))
@@ -429,6 +436,7 @@ def _body_sheet(p, body, dwg_no, size, k):
         for i, c in enumerate(taps):
             D.rec("fp_tap_on_mating_face" + ("" if i == 0 else f"#{i + 1}"), mface - _span(c, dv)[1], 0.0, "")
         D.each("fp_tap_drill_d", [2 * c.r for c in taps], p.tap_drill_d, lambda v: f"φ{_fmt(v)}")
+        D.each("fp_tap_drill_vs_M5", [stem.m5_drill_excess(2 * c.r) for c in taps], 0.0, lambda v: "")
         sh.leader(aux.to_sheet(tr) + (1.2, 1.2), [(ab[1][0] + 4, ab[1][1] + 4), (ab[0][0] - 4, ab[1][1] + 4)], "",
                   lines=[f"4×M5×0.8 深さ{_fmt(fthr)}", f"  下穴φ{_fmt(2 * taps[0].r)} 深さ{_fmt(e1 - e0)}"])
         w_, h_ = sh.fcf((ab[0][0], ab[0][1] - 26), ["flatness", "0.05"])
@@ -713,6 +721,12 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
         sfx = "" if i == 0 else f"#{i + 1}"
         D.rec("bolt_hole_from_mating_face" + sfx, h0 - t_back, 0.0, "")
         D.rec("bolt_hole_to_cbore" + sfx, (span_d(mate[0])[0] - h1) if mate else float("inf"), 0.0, "")
+        # and the bolt passes: the hole's full section, from the gap to the counterbore, is clear
+        if mate:
+            def on_axis(t):
+                return c.loc + dv * (Bm @ dv + t - c.loc @ dv)
+            D.rec("bolt_hole_clear" + sfx, _material_in(fp, on_axis(t_back - 0.3), on_axis(span_d(mate[0])[0] + 0.3),
+                                                        c.r - 1e-3), 0.0, "")
     D.each("cbore_d", [2 * c.r for c in cb], p.cbore_d, lambda v: f"φ{_fmt(v)}")
     if len(holes) == 4:
         q = np.array([[c.loc[1], (c.loc - Bm) @ nv] for c in holes])
@@ -725,11 +739,11 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
         cb_depth = t_front - (cb[0].axial_extent()[0] - Bm @ dv) if cb else 0.0
         D.each("cbore_depth", [t_front - (c.axial_extent()[0] - Bm @ dv) for c in cb] or [0.0], 2.5, _fmt)
         # each counterbore opens out of the front: across its whole section (to within the
-        # kernel tolerance of its wall), from inside it
+        # kernel tolerance of its wall), from its bottom
         # out past its top, no material (a skin or ring of any thickness shows)
         def axis_pt(c, t):               # point on c's axis at t along d from Bm
             return c.loc + dv * (Bm @ dv + t - c.loc @ dv)
-        D.each("cbore_open", [_material_in(fp, axis_pt(c, sum(span_d(c)) / 2), axis_pt(c, span_d(c)[1] + 1.0), c.r - 1e-3)
+        D.each("cbore_open", [_material_in(fp, axis_pt(c, span_d(c)[0] + 1e-3), axis_pt(c, span_d(c)[1] + 1.0), c.r - 1e-3)
                               for c in cb], 0.0, lambda v: "")
         fb_ = front.bbox()
         sh.leader(fs(tl) + np.array([-1, 1]) * scale * holes[0].r * 0.7,
