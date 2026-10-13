@@ -3,6 +3,11 @@ import math, json, sys
 from dataclasses import dataclass, asdict, field
 from build123d import *
 
+# Revision of the geometry this module builds. It is part of the drawing/STEP document
+# number, so bump it whenever build() returns a different shape for the same parameters
+# (tests/test_drawing.py pins the default model's fingerprint to this revision).
+GEOMETRY_REV = 1
+
 MATERIALS = {  # density g/cm3
     "A6061-T6": 2.70, "A7075-T6": 2.81, "A2014-T6": 2.80, "Ti-6Al-4V": 4.43,
 }
