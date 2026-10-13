@@ -85,3 +85,17 @@ def test_shrink_and_clamp_follow_the_parameters():
     g1 = dc.gating_sizes(P, DP, 60_000)
     g2 = dc.gating_sizes(P, dc.DiecastParams(gate_v_m_s=50.0), 60_000)
     assert g2["gate_area_mm2"] < g1["gate_area_mm2"]
+
+
+# default bracket's (casting volume, finished volume) per geometry revision: a change to
+# bracket.build() that moves these must bump bracket.GEOMETRY_REV (it is in the document number)
+GEOMETRY_FINGERPRINT = {1: (57460.0, 55272.6)}
+
+
+def test_document_number_follows_the_geometry_revision(made, monkeypatch):
+    from scripts.make_diecast import doc_no
+    ds, _ = made
+    assert GEOMETRY_FINGERPRINT[bracket.GEOMETRY_REV] == (round(ds["casting"].volume, 1), round(ds["finished"].volume, 1))
+    before = doc_no(P)
+    monkeypatch.setattr(bracket, "GEOMETRY_REV", bracket.GEOMETRY_REV + 1)
+    assert doc_no(P) != before

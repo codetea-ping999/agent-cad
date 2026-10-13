@@ -16,7 +16,12 @@ from build123d import Box, Cylinder, Pos, Align
 from ..materials import MATERIALS
 from ..process.forging import drafted_prism
 
-__all__ = ["BracketParams", "build", "density", "asdict"]
+__all__ = ["BracketParams", "build", "density", "asdict", "GEOMETRY_REV"]
+
+# Revision of the geometry build() makes; part of the document number (scripts/make_diecast.py).
+# Bump it whenever build() returns a different shape for the same parameters
+# (tests/test_diecast.py pins the default model's fingerprint to it).
+GEOMETRY_REV = 1
 
 
 @dataclass(frozen=True)

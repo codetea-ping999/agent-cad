@@ -22,7 +22,9 @@ CAST_RGB, DIE_RGB, PIN_RGB = (0.75, 0.76, 0.78), (0.42, 0.47, 0.52), (0.85, 0.65
 
 
 def doc_no(p):
-    h = hashlib.sha1(json.dumps(bracket.asdict(p), sort_keys=True, default=str).encode()).hexdigest()[:12].upper()
+    """Unique to the parameter set and the geometry revision of the model code."""
+    key = dict(bracket.asdict(p), _geometry_rev=bracket.GEOMETRY_REV)
+    h = hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode()).hexdigest()[:12].upper()
     return f"AC-BRKT-{h}"
 
 
