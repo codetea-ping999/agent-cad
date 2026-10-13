@@ -751,3 +751,30 @@ def test_overcut_bores_are_rejected():
     g_fp = Pos(*(np.array([B.X, 13.0, B.Z]) + dv * (p.bar_d / 2))) * Box(1.0, 3.0, 1.0)
     bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f - g_fp)))}
     assert "dim.bar_bore_overcut_mm3" in bad, bad
+
+
+def test_any_local_edit_of_the_model_is_rejected():
+    """Edits the feature probes need not each catch (a groove at a bore mouth, an outward
+    notch in the window wall or a tap drill, a bridge across the slot): the sheet's part is
+    exactly the model stem.build() makes for its parameters."""
+    import numpy as np
+    from build123d import Box, Pos
+    from agent_cad.drawing.measure import find_cyl
+    p = CASES[0]
+    b, f = stem.build(p)
+    assert check_sheet(stem_drawing.body_sheet(p, b))["pass"] and check_sheet(stem_drawing.faceplate_sheet(p, f))["pass"]
+    d, n, S, B = stem.frame(p)
+    dv = np.array([d.X, d.Y, d.Z])
+    r = p.steerer_d / 2
+    t = find_cyl(b, dv, r=p.tap_drill_d / 2, inner=True)[0]
+    mid = t.loc + dv * (np.mean(t.axial_extent()) * np.sign(t.axis @ dv) - t.loc @ dv)
+    body_edits = [b - Pos(0, r, 0.2) * Box(3.0, 1.0, 0.4),                     # groove at the bore mouth
+                  b - Pos(*(mid + np.array([0, t.r, 0]))) * Box(0.6, 1.0, 0.6),  # outward notch in a tap drill
+                  b + Pos(-p.steerer_d / 2 - p.steerer_wall / 2, 0, p.stack_h / 2) * Box(1.0, p.slot_w + 0.2, 1.0)]
+    for e in body_edits:
+        bad = {x["check"] for x in failed(check_sheet(stem_drawing.body_sheet(p, e)))}
+        assert "dim.body_matches_model_mm3" in bad, bad
+    v = f.vertices()[0]
+    notch = Pos(v.X, v.Y, v.Z) * Box(1.0, 1.0, 1.0)                            # a nick at a faceplate corner
+    bad = {x["check"] for x in failed(check_sheet(stem_drawing.faceplate_sheet(p, f - notch)))}
+    assert "dim.faceplate_matches_model_mm3" in bad, bad
