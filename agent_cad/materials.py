@@ -29,4 +29,11 @@ MATERIALS = {
     "Ti-6Al-4V": Material(113_800, 0.342, 880, 950, 510, 4.43, 9.7e-6),
     # die-casting alloy, as cast (JIS H 5302 ADC12 typical; fatigue at 5e8 cycles)
     "ADC12": Material(71_000, 0.33, 150, 310, 138, 2.70, 21.0e-6),
+    # injection-moulding resins, dry as moulded, 23 C (typical datasheet values; glass-filled
+    # grades are anisotropic: E and strength along the flow; yield = stress at break for them;
+    # fatigue at 1e7 cycles, R = -1, estimate)
+    "PA66-GF30": Material(10_000, 0.35, 185, 185, 50, 1.37, 25.0e-6),
+    "PA6-GF30": Material(9_500, 0.35, 175, 175, 45, 1.36, 25.0e-6),
+    "PBT-GF30": Material(10_000, 0.38, 135, 135, 35, 1.53, 30.0e-6),
+    "PP": Material(1_500, 0.42, 33, 33, 10, 0.905, 110.0e-6),
 }
