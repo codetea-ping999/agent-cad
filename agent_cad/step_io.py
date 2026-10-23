@@ -37,6 +37,8 @@ class PartSpec:
     color: tuple = (0.6, 0.64, 0.7)       # RGB 0..1
     material: str = ""
     density_g_cm3: float = 0.0
+    pmi: list | None = None                # drawing dimensions to write as semantic PMI (agent_cad.pmi)
+    pmi_skipped: list | None = None        # set by write_step: those not linked to faces
 
 
 def definitions(parts):
@@ -157,6 +159,9 @@ def write_step(parts, path, assembly_name=None, author="agent-cad", organization
             m = mt.AddMaterial(h(ps.material), h(ps.material), ps.density_g_cm3,  # written as g/cm3
                                h("density"), h("POSITIVE_RATIO_MEASURE"))
             mt.SetMaterial(lab, m)
+        if ps.pmi:
+            from .pmi import attach
+            ps.pmi_skipped = attach(doc, lab, shp, ps.pmi)
     if asm is not None:
         for lab, loc in comp:                 # one component per part, in the caller's order
             st.AddComponent(asm, lab, loc)
@@ -165,6 +170,7 @@ def write_step(parts, path, assembly_name=None, author="agent-cad", organization
     Interface_Static.SetIVal_s("write.step.schema", AP242)
     Interface_Static.SetCVal_s("write.step.unit", "MM")
     w.SetNameMode(True); w.SetColorMode(True); w.SetPropsMode(True); w.SetMaterialMode(True)
+    w.SetDimTolMode(any(ps.pmi for ps in parts))
     if not w.Transfer(doc, STEPControl_AsIs):
         raise IOError(f"STEP transfer failed (nothing written): {path}")
     from OCP.APIHeaderSection import APIHeaderSection_MakeHeader
