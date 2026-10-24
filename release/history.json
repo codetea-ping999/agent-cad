@@ -39,6 +39,16 @@
    "rev": "-"
   }
  ],
+ "AC-1301": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "4efc41bf6f5d7bda",
+   "rev": "-"
+  }
+ ],
  "AC-5101": [
   {
    "approved_by": "Toyoharu",
@@ -136,6 +146,116 @@
    "change": "初版",
    "date": "2026-10-23",
    "fingerprint": "c933bd685544007e",
+   "rev": "-"
+  }
+ ],
+ "AC-5401": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "5c8f63cf25b3e06c",
+   "rev": "-"
+  }
+ ],
+ "AC-5402": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "60980a536c9ccd78",
+   "rev": "-"
+  }
+ ],
+ "AC-5403": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "ea96ca047d7516f0",
+   "rev": "-"
+  }
+ ],
+ "AC-5404": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "f198fff9b46d8b3a",
+   "rev": "-"
+  }
+ ],
+ "AC-5405": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "08e2d891143a6a9e",
+   "rev": "-"
+  }
+ ],
+ "AC-5406": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "9416b31f416d1665",
+   "rev": "-"
+  }
+ ],
+ "AC-5407": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "cda3dfcb6ae0f795",
+   "rev": "-"
+  }
+ ],
+ "AC-5408": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "ae18af3528e2ad5b",
+   "rev": "-"
+  }
+ ],
+ "AC-5409": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "ef377a691d3ef01a",
+   "rev": "-"
+  }
+ ],
+ "AC-5411": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "97d0ea74182d81d9",
+   "rev": "-"
+  }
+ ],
+ "AC-5412": [
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "初版",
+   "date": "2026-10-24",
+   "fingerprint": "697f93cbd629adc9",
    "rev": "-"
   }
  ]

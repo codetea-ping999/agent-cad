@@ -24,12 +24,12 @@ from agent_cad.drawing.check import check_sheet
 from agent_cad.drawing.render import to_pdf, to_dxf
 from agent_cad.drawing.sheet import Sheet, A3
 from agent_cad.drawing import tool
-from agent_cad.parts import stem, stem_drawing, bracket, bracket_drawing, housing, housing_drawing
-from agent_cad.process import forging as fg, diecast as dc, molding as mo
+from agent_cad.parts import stem, stem_drawing, bracket, bracket_drawing, housing, housing_drawing, handlebar as hb, handlebar_drawing
+from agent_cad.process import forging as fg, diecast as dc, molding as mo, tube_bending as tb
 from agent_cad.verify.forging_check import verify_forging
 from agent_cad.verify.diecast_check import verify_diecast
 from agent_cad.verify.molding_check import verify_molding
-from scripts import make_stem, make_diecast, make_molding
+from scripts import make_stem, make_diecast, make_molding, make_handlebar
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY = os.path.join(ROOT, "release", "registry.json")
@@ -68,6 +68,12 @@ def mould_case(case):
     p, mp = make_molding.CASES[case], mo.MouldParams()
     ms = mo.mould_set(p, mp)
     return p, mp, ms, verify_molding(p, mp, ms=ms)
+
+
+@lru_cache(None)
+def handlebar_case(case):
+    p, tp, bar, rep, tools, prep = make_handlebar.case(case)
+    return p, tp, bar, rep, tools, prep, tb.tool_parts(p, tp, tools, make_handlebar.SETUP)
 
 
 def _design(rep):
@@ -266,12 +272,88 @@ def g_mould_assembly(it, ctx):
     return dict(sheet=sh, parts=parts, assembly=f"{it['number']}_MOULD", shape=shape, design=_design(rep), kind="型組立")
 
 
+def g_handlebar(it, ctx):
+    p, tp, bar, rep, tools, prep, parts = handlebar_case(it["case"])
+    sh = handlebar_drawing.part_sheet(p, bar, it["number"])
+    ps = PartSpec(f"{it['number']}_HANDLEBAR", bar, make_handlebar.BAR_RGB, p.material, hb.density(p), pmi=pmi.from_sheet(sh))
+    return dict(sheet=sh, parts=[ps], assembly=None, shape=bar, design=_design(rep), kind="製品")
+
+
+# bending / swaging tool parts: (key in tb.tool_parts, STEP name, note)
+BEND_TOOLS = {
+    "bend_die": ("BEND_DIE", "溝は管外径 + 片側 {c:g} の円弧溝、曲げ半径 R{R:g} (溝中心)。クランプインサートのポケット付き。"),
+    "clamp_straight": ("CLAMP_DIE_STRAIGHT", "B1・B3 用 (直管部をつかむ)。溝面はつかみ用ローレット (協議)。"),
+    "insert_straight": ("CLAMP_INSERT_STRAIGHT", "B1・B3 用。曲げ型のポケットにボルト締結 (協議)。"),
+    "clamp": ("CLAMP_DIE_B2", "B2 用。溝は B1 の曲げ部に沿う (3Dデータによる)。"),
+    "insert": ("CLAMP_INSERT_B2", "B2 用。溝は B1 の曲げ部に沿う (3Dデータによる)。"),
+    "pressure_die": ("PRESSURE_DIE", "全曲げ共用。曲げ型とのすきま {g:g}。"),
+    "wiper": ("WIPER_DIE", "全曲げ共用。先端は曲げ型の溝に合わせて仕上げる (フェザーエッジ)。"),
+    "mandrel": ("BALL_MANDREL", "ボール {n} 個、管内径とのすきま片側 {m:g}。リンクはメーカーと協議。"),
+    "swage_die": ("SWAGE_DIE_HALF", "ロータリースエージング型 (2 つ割の片側、同形 2 個で 1 組)。"),
+    "swage_mandrel": ("SWAGE_MANDREL", "段付きマンドレル。肉厚 (バテッド) を決める。"),
+}
+
+
+def g_bend_tool(which):
+    def g(it, ctx):
+        p, tp, bar, rep, tools, prep, parts = handlebar_case(it["case"])
+        t = parts[which]
+        en, note = BEND_TOOLS[which]
+        mr = tools["plan"][make_handlebar.SETUP]["mandrel"]
+        note = note.format(c=tp.groove_clr, R=tools["arc"].R, g=tp.pd_gap, n=mr["balls"], m=tp.mandrel_clr)
+        surface = "溝面" if not which.startswith("mandrel") and which != "swage_mandrel" else "外周面"
+        info = dict(number=it["number"], title=it["title"], material=t["material"][0], finish=t["material"][1], up=1,
+                    block=t["block"], holes=t["holes"], density_g_cm3=t["density"], surface=surface, cavity_ra=0.2,
+                    shape_note="溝・成形面の形状は3Dデータ (STEP AP242、同図番) による。",
+                    edge_note="指示なきかどは C0.5、溝の縁は R0.5。",
+                    notes=[_product_note(it, ctx, note)])
+        sh = tool.component_sheet(t["shape"], info)
+        rgb = make_handlebar.BRONZE_RGB if which == "wiper" else STEEL_RGB
+        ps = PartSpec(f"{it['number']}_{en}", t["shape"], rgb, t["material"][0].split(" (")[0], t["density"], pmi=pmi.from_sheet(sh))
+        return dict(sheet=sh, parts=[ps], assembly=None, shape=t["shape"], design=_design(prep), kind="型部品")
+    return g
+
+
+def g_bend_assembly(it, ctx):
+    p, tp, bar, rep, tools, prep, parts = handlebar_case(it["case"])
+    n = ctx["numbers"]
+    keys = ["bend_die", "clamp", "insert", "pressure_die", "wiper"]
+    mand = Compound([tools["mandrel_shank"], *tools["mandrel_balls"]])
+    shape = Compound([tools[k] for k in keys] + [mand, tools["tube"]])
+    dim = Compound([tools[k] for k in keys])
+    bb = dim.bounding_box()
+    st = tb.TOOL_STEEL[0].split(" (")[0]
+    bom = [("曲げ型", n["bend_die"], st, 1, ""), ("クランプ型 (B2)", n["bend_clamp_b2"], st, 1, ""),
+           ("クランプインサート (B2)", n["bend_insert_b2"], st, 1, ""), ("プレッシャー型", n["bend_pressure_die"], st, 1, ""),
+           ("ワイパー型", n["bend_wiper"], "CAC703", 1, ""), ("ボールマンドレル", n["bend_mandrel"], st, 1, ""),
+           ("曲げ途中の管 (B1 曲げ後)", it["product"], tb.BENDING_TEMPER.get(p.material, p.material), 1, "参考")]
+    mass = sum(tools[k].volume for k in keys) / 1000 * 7.8 + mand.volume / 1000 * 7.8
+    b = tools["plan"][make_handlebar.SETUP]
+    info = dict(number=it["number"], title=it["title"], up=1, block=(bb.size.X, bb.size.Y, bb.size.Z), dim_shape=dim,
+                bom=bom, parts_count=7, mass_g=mass,
+                notes=[_product_note(it, ctx, "回転引き曲げ、右側 B2 (フード部) の段取り。曲げ型軸 Z、接点 (0, -R, 0)。"),
+                       f"曲げ角 {b['angle']:g}°、オーバーベンド {b['springback']['overbend_deg']:g}° (O 材、試し曲げで補正)。",
+                       f"B1・B3 は直線クランプ型・インサート ({n['bend_clamp']}・{n['bend_insert']}) に替える。",
+                       "曲げ型・プレッシャー型・ワイパー型・マンドレルは全曲げ共用。",
+                       "左側は逆勝手 (両方向曲げ機) で同じ型を使う。"])
+    sh = tool.assembly_sheet(shape, info)
+    specs = make_handlebar.setup_specs(p, tools, it["number"])
+    return dict(sheet=sh, parts=specs, assembly=f"{it['number']}_BENDING_SETUP_B2", shape=shape, design=_design(prep),
+                kind="型組立")
+
+
 SOURCES = {
     "stem_body": g_stem_body, "stem_faceplate": g_stem_faceplate, "bracket": g_bracket, "housing": g_housing,
     "forging_upper": g_forging_die("upper"), "forging_lower": g_forging_die("lower"), "forging_assembly": g_forging_assembly,
     "diecast_moving": g_diecast_die("moving"), "diecast_cover": g_diecast_die("cover"), "diecast_assembly": g_diecast_assembly,
     "mould_fixed": g_mould_part("fixed"), "mould_moving": g_mould_part("moving"), "mould_slide": g_mould_part("slide"),
     "mould_assembly": g_mould_assembly,
+    "handlebar": g_handlebar, "bend_assembly": g_bend_assembly, "bend_die": g_bend_tool("bend_die"),
+    "bend_clamp": g_bend_tool("clamp_straight"), "bend_insert": g_bend_tool("insert_straight"),
+    "bend_clamp_b2": g_bend_tool("clamp"), "bend_insert_b2": g_bend_tool("insert"),
+    "bend_pressure_die": g_bend_tool("pressure_die"), "bend_wiper": g_bend_tool("wiper"),
+    "bend_mandrel": g_bend_tool("mandrel"), "swage_die": g_bend_tool("swage_die"),
+    "swage_mandrel": g_bend_tool("swage_mandrel"),
 }
 
 

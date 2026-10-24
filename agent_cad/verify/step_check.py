@@ -160,9 +160,11 @@ def _mass(shape):
     return v, a, (c.X(), c.Y(), c.Z())
 
 
-def _inertia(shape, eps=1e-9):
+def _inertia(shape, eps=1e-12):
     """Inertia tensor about the centroid, in model axes (unit density).
-    Unlike volume/area/centroid it changes when the part is rotated."""
+    Unlike volume/area/centroid it changes when the part is rotated. eps 1e-12: at 1e-9 the
+    adaptive integration of a rotated torus groove with B-spline relief cuts differs by
+    6e-4 between the model and its read-back (1e-12: 3e-6)."""
     g = GProp_GProps()
     BRepGProp.VolumeProperties_s(shape.wrapped, g, Eps=eps)
     m = g.MatrixOfInertia()
