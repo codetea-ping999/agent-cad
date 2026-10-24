@@ -52,8 +52,8 @@ def wall_samples(shape, per_face=6, min_gap=1e-3, max_angle_deg=30.0, refine=0.0
     With refine = r, each face whose thinnest sample is within r x the thinnest of all is
     refined around it: `levels` times a 5 x 5 grid over the cell round the current best,
     the cell shrinking by 3 each time, so a minimum between the grid points is found.
-    Refined points keep the grid's half-cell distance from the face boundary, and wrap
-    across the seam of a periodic surface."""
+    Refinement reaches up to the face boundary and wraps across the seam of a periodic
+    surface."""
     cos_max = np.cos(np.radians(max_angle_deg))
     inter = IntCurvesFace_ShapeIntersector()
     inter.Load(shape.wrapped, 1e-6)
@@ -79,8 +79,9 @@ def wall_samples(shape, per_face=6, min_gap=1e-3, max_angle_deg=30.0, refine=0.0
     for t, pt, fi, u, v in (w for w in face_best.values() if refine and w[0] <= refine * tmin):
         f, s, props, cls, rev, (u0, u1, v0, v1) = ctx[fi]
         du, dv = (u1 - u0) / per_face, (v1 - v0) / per_face
-        # stay as far from the face boundary as the grid does: half a cell
-        lo_u, hi_u, lo_v, hi_v = u0 + du / 2, u1 - du / 2, v0 + dv / 2, v1 - dv / 2
+        # up to the face boundary (a grazing ray at an edge is rejected by the exit angle)
+        eu, ev = (u1 - u0) * 1e-4, (v1 - v0) * 1e-4
+        lo_u, hi_u, lo_v, hi_v = u0 + eu, u1 - eu, v0 + ev, v1 - ev
         # a periodic direction (round a cylinder) has no boundary there: wrap across the seam
         if s.IsUPeriodic():
             wrap_u = lambda x, s=s: u0 + (x - u0) % s.UPeriod()
