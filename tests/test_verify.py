@@ -14,6 +14,12 @@ def test_wall_of_a_tube_is_measured():
     assert abs(w["min_mm"] - 1.5) < 0.01
 
 
+def test_a_very_thin_wall_is_measured():
+    from build123d import Box
+    w = min_wall(Box(10, 10, 0.04))
+    assert w and abs(w["min_mm"] - 0.04) < 1e-3
+
+
 def test_cantilever_matches_beam_theory():
     """Solver check: tip-loaded cantilever 100 x 10 x 10 vs P L^3 / 3EI (+ shear)."""
     from build123d import Box, Align
