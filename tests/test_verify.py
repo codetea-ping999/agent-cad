@@ -55,3 +55,15 @@ def test_cli_exit_status(tmp_path):
     out = tmp_path / "v.json"
     assert main(["--no-fea", "--json", str(out)]) == 0 and out.exists()
     assert main(["--no-fea", "--set", "steerer_wall=1.0"]) == 1
+
+
+def test_overrides_follow_the_declared_types():
+    from scripts.verify_stem import parse_set
+    from scripts.make_stem import CASES
+    p = parse_set(CASES["stem110_-17_7075"], ["angle_deg=-16.5", "length=110.5"])
+    assert p.angle_deg == -16.5 and p.length == 110.5
+
+
+def test_tap_drill_outside_the_M5_band_fails_the_loop():
+    r = verify(dataclasses.replace(stem.StemParams(), tap_drill_d=3.3), fea=False)
+    assert "thread.tap_drill_M5" in r["failed"]
