@@ -103,8 +103,9 @@ def gating(p, dp, cast_volume):
     hz = p.plate_w / 2
     xs, zs = sleeve_center(p, dp)
     z_gate = -hz - dp.gate_land_mm
-    rw, gw = g["runner_w_mm"], max(g["gate_w_mm"], g["runner_w_mm"])
-    # fan runner: from the biscuit centre to the gate land, widening to the gate width
+    rw, gw = g["runner_w_mm"], g["gate_w_mm"]
+    # fan runner: from the biscuit centre to the gate land, widening (or narrowing) to the
+    # gate width, so the modelled gate is the section the gate velocity is sized for
     fan = SPolygon([(xs - rw / 2, zs), (xs + rw / 2, zs), (gw / 2, z_gate), (-gw / 2, z_gate)])
     runner = drafted_prism(fan, dp.runner_depth_mm, dp.runner_draft_deg)
     land = box(-gw / 2, z_gate - 0.5, gw / 2, -hz + 0.5)       # overlaps runner and plate edge
