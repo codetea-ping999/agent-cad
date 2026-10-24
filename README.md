@@ -78,6 +78,7 @@ python -m pytest -q tests   # 正常ファイルの合格と、面欠落・検�
 | geometry | 本体・フェイスプレートがそれぞれ1個の有効ソリッド、相手部品との干渉0 | B-repチェック |
 | wall | 最小肉厚 ≥ 1.5 mm | B-repで面の内向き法線方向にレイを飛ばして実測 |
 | thread | 有効ねじ深さ ≥ 1.5d（M5で7.5 mm） | 図面のねじ深さと同じ値（止まり穴は下穴深さ−2 mm） |
+| thread.tap_drill_M5 | 下穴径が M5 の谷径範囲（4.134〜4.334 mm）内 | JIS B 0209-2（6H の D1） |
 | mass | 質量 ≤ `mass_target_g` | パラメータ |
 | strength | von Mises（99.9パーセンタイル） ≤ 耐力/1.2（静的）、疲労強度/1.5（疲労） | 線形FEA（gmsh P2四面体 + scikit-fem）、コラム穴固定・ハンドル穴に荷重 |
 
