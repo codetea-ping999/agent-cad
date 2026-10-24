@@ -61,9 +61,10 @@ def wall_samples(shape, per_face=6, min_gap=1e-3, max_angle_deg=30.0):
     return out
 
 
-def min_wall(shape, per_face=6, ignore_below=0.05):
-    """Thinnest measured wall (ignoring grazing hits at edges below `ignore_below`)."""
-    s = [w for w in wall_samples(shape, per_face) if w[0] > ignore_below]
+def min_wall(shape, per_face=6):
+    """Thinnest measured wall. Grazing hits at edges are already dropped by the exit-face
+    angle in wall_samples, so every sample counts, however thin the wall."""
+    s = wall_samples(shape, per_face)
     if not s:
         return None
     t, pt, fi = min(s, key=lambda w: w[0])
