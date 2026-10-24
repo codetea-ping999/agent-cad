@@ -27,6 +27,13 @@ def test_a_minimum_between_the_grid_points_is_found():
     assert abs(w["min_mm"] - 1.45) < 0.01
 
 
+def test_a_minimum_at_the_face_boundary_is_found():
+    from build123d import Cylinder, Cone
+    # tapered bore: the thinnest wall (1.4 mm) is at the wide end, outside the grid's band
+    w = min_wall(Cylinder(10, 30) - Cone(6, 8.6, 30))
+    assert abs(w["min_mm"] - 1.4) < 0.01
+
+
 def test_counterbore_web_to_the_bar_bore_is_found():
     # faceplate bolts at 20.2 mm (geometry rev 2): the counterbore leaves ~0.58 mm to the bar
     # bore, between the coarse samples; the refined search finds it
