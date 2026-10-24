@@ -20,6 +20,21 @@ def test_a_very_thin_wall_is_measured():
     assert w and abs(w["min_mm"] - 0.04) < 1e-3
 
 
+def test_a_minimum_between_the_grid_points_is_found():
+    from build123d import Cylinder, Pos
+    # off-centre bore: the thinnest wall (1.45 mm) lies between the angular samples
+    w = min_wall(Cylinder(10, 30) - Pos(0.55, 0, 0) * Cylinder(8, 30))
+    assert abs(w["min_mm"] - 1.45) < 0.01
+
+
+def test_counterbore_web_to_the_bar_bore_is_found():
+    # faceplate bolts at 20.2 mm (geometry rev 2): the counterbore leaves ~0.58 mm to the bar
+    # bore, between the coarse samples; the refined search finds it
+    r = verify(dataclasses.replace(stem.StemParams(), fp_bolt_off=20.2), fea=False)
+    w = {x["check"]: x for x in r["rules"]}["wall.faceplate"]
+    assert "wall.faceplate" in r["failed"] and w["value"] < 0.7
+
+
 def test_cantilever_matches_beam_theory():
     """Solver check: tip-loaded cantilever 100 x 10 x 10 vs P L^3 / 3EI (+ shear)."""
     from build123d import Box, Align
