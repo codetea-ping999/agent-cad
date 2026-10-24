@@ -64,6 +64,9 @@ def body_fea(p, body, cases=LOAD_CASES, h=2.0):
 
 def verify(p: stem.StemParams, fea=True, h=2.0, cases=LOAD_CASES):
     cases = tuple(cases)                        # iterated twice: the solves, then the rules
+    names = [lc.name for lc in cases]
+    if len(set(names)) != len(names):           # results are keyed by name
+        raise ValueError(f"duplicate load case names: {names}")
     b, f = stem.build(p)
     g = stem.checks(p, b, f)
     mat = MATERIALS[p.material]
