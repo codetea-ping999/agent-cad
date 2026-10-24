@@ -135,3 +135,13 @@ def test_tooling_is_numbered_by_the_process_and_assembled_hot(made):
     assert s["moving"].name.startswith(tool_no(P, DP)) and s["casting"].name.startswith(doc_no(P) + "-C1")
     # the shot in the die assembly is the cavity it fills, not the cold shot
     assert abs(s["shot_hot"].shape.volume - ds["cavity"].volume) < 1e-3 * ds["cavity"].volume
+
+
+def test_no_seat_for_any_pin_is_a_failed_rule_and_clamp_uses_the_cavity(made):
+    ds, rep = made
+    bare = dict(ds, pins=[], pin_sites=[])
+    r = {x["check"]: x for x in verify_diecast(P, DP, ds=bare)["rules"]}
+    assert not r["ejector.pins_seated"]["pass"] and not r["ejector.pins_on_part"]["pass"]
+    from agent_cad.process.forging import section2d
+    cav = section2d(ds["cavity"], 1e-3).union(section2d(ds["cavity"], -1e-3)).area
+    assert abs(rep["process"]["projected_area_mm2"] - cav) < 0.005 * cav

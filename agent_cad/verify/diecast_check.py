@@ -94,7 +94,7 @@ def verify_diecast(p=bracket.BracketParams(), dp=dc.DiecastParams(), ds=None):
     # a pin is on the casting when the casting itself is under its face (overflow wells can
     # have the plate's height)
     on_part = sum(1 for x, z, y in ds["pin_sites"] if cast.is_inside(Vector(x, y - 0.05, z)))
-    rules.append(_rule("ejector.pins_seated", min(seat) > 0.999, min(seat), 1.0,
+    rules.append(_rule("ejector.pins_seated", min(seat, default=0.0) > 0.999, min(seat, default=0.0), 1.0,
                        "fraction of each pin face backed by the shot", per_pin=seat))
     rules.append(_rule("ejector.pins_clear", cut < 1e-2, round(cut, 4), 0.0, "mm3 of pin inside the cavity or the die"))
     rules.append(_rule("ejector.pins_on_part", on_part >= 4, on_part, 4,
@@ -125,7 +125,7 @@ def verify_diecast(p=bracket.BracketParams(), dp=dc.DiecastParams(), ds=None):
 
     # process estimates
     proj = section2d(shot, 1e-3).union(section2d(shot, -1e-3))
-    area = proj.area
+    area = proj.area * k ** 2                                   # the hot cavity, not the cold shot
     f_open = dp.pressure_MPa * area / 1000                     # kN
     f_clamp = dp.clamp_margin * f_open
     t_clamp = f_clamp / 9.81
