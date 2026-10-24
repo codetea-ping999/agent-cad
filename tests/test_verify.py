@@ -80,7 +80,7 @@ def test_fea_on_a_coarse_mesh():
 
 def test_cli_exit_status(tmp_path):
     from scripts.verify_stem import main
-    out = tmp_path / "v.json"
+    out = tmp_path / "new_dir" / "v.json"
     assert main(["--no-fea", "--json", str(out)]) == 0 and out.exists()
     assert main(["--no-fea", "--set", "steerer_wall=1.0"]) == 1
 
@@ -95,3 +95,9 @@ def test_overrides_follow_the_declared_types():
 def test_tap_drill_outside_the_M5_band_fails_the_loop():
     r = verify(dataclasses.replace(stem.StemParams(), tap_drill_d=3.3), fea=False)
     assert "thread.tap_drill_M5" in r["failed"]
+
+
+def test_duplicate_load_case_names_are_rejected():
+    from agent_cad.verify.stem_verify import LOAD_CASES
+    with pytest.raises(ValueError):
+        verify(stem.StemParams(), cases=(LOAD_CASES[0], LOAD_CASES[0]))
