@@ -22,6 +22,9 @@
 - `agent_cad/parts/handlebar.py`, `handlebar_drawing.py` ロードドロップハンドルとその図面
 - `agent_cad/process/tube_bending.py`, `agent_cad/verify/tube_check.py` 管のスエージング・回転引き曲げの工程と治工具、そのチェック
 - `agent_cad/verify/handlebar_verify.py`, `agent_cad/fea/beam.py`, `bar_fea.py` ハンドルの強度検証（梁FEAとソリッドFEA）
+- `agent_cad/fastener.py`, `agent_cad/verify/fastener_check.py` ボルト締結計算（VDI 2230 簡易法・JIS B 1083）と各部品の継手
+- `agent_cad/fea/convergence.py`, `agent_cad/verify/mesh_study.py` メッシュ品質とメッシュ収束（Richardson 外挿・GCI）
+- `agent_cad/report.py` A4 計算書 PDF（締結計算書・メッシュ収束解析報告書）
 - `agent_cad/render.py` 簡易レンダリング（matplotlib）
 - `scripts/` 生成スクリプト（出力は `out/`）
 
@@ -35,6 +38,8 @@ python -m scripts.make_forging       # 鍛造品・鍛造型の STEP / レポー
 python -m scripts.make_diecast       # ダイカスト品・ダイカスト型
 python -m scripts.make_molding       # 樹脂ハウジング・射出成形金型・図面
 python -m scripts.make_handlebar     # ドロップハンドル・スエージ/曲げ型・図面
+python -m scripts.fastener_report    # 締結計算書（PDF/JSON）を out/fastener/ に出力
+python -m scripts.mesh_study         # メッシュ収束解析（約30分）を out/mesh/ に出力
 python -m scripts.verify_stem --set length=120 --set material=A7075-T6 --json out/v.json
 ```
 
@@ -204,6 +209,29 @@ python -m pytest -q tests   # 正常ファイルの合格と、面欠落・検�
 荷重は暫定（ISO 4210-5 の数値は規格本文で確認すること）、スプリングバックと曲げトルクは機械を合わせるための概算。曲げの肉厚変化・偏平は試し曲げと断面測定で確認する。
 
 図面（A2、1:2、第三角法）：正面図、上からの断面 A-A、右側面図、クランプ部の取り外し断面 B-B（1:1）。曲げ表（L・R・A）、頂点座標表、肉厚表を付け、クランプ径 φ31.8 h10・グリップ径 φ23.8 h11、クランプ面 Ra 1.6。
+
+## 締結計算書
+
+`python -m scripts.fastener_report` → `out/fastener/締結計算書.pdf` と継手ごとの JSON。VDI 2230 Part 1 の簡易計算法と JIS B 1083 のトルク係数式で、締付トルクの範囲と摩擦係数のばらつき（μ 0.10〜0.16）から締付軸力の最小・最大を出し、次を確認する。形状は部品パラメータから読むので、寸法・材料を変えると再計算される。
+
+| 判定 | 内容 |
+|---|---|
+| 締付時ボルト応力 | F_M,max での相当応力 ≤ 0.9 Rp0.2 |
+| 使用時ボルト応力 | 作用荷重を加えた相当応力（ねじりは半分に緩和） ≤ Rp0.2 |
+| 残留締付力 | F_M,min − なじみ損失 − (1 − Φn) F_A ≥ 継手に必要な締付力（滑り・ねじり試験トルク） |
+| ボルト疲労 | 応力振幅 ≤ σ_ASV / 1.2 |
+| 座面圧 | ≤ 0.9 Rm（被締結材） |
+| 雌ねじせん断 | ねじ山のせん断力 ≥ ボルト破断力（ボルトが先に切れる） |
+
+- ステム ピンチボルト（2×M5）：スリット付きクランプリング。リングのたわみをばね定数に、ステアラ接触面のなじみをスリットの閉じ量（2π倍）に換算。要求はステアラまわりのねじり試験トルク（暫定 40 N·m）
+- ステム フェイスプレート（4×M5）：フェイスプレートの曲げたわみは FEA で求める（バー穴固定、座ぐり底に軸力）。要求はハンドル回転トルク（暫定試験 60 N·m × 1.2、ハンドル検証の同相フード疲労ピーク、静的フード荷重）。ハンドルバーの挟み部の周方向応力も確認
+- ブラケット（4×M8 通しボルト）：ハブ荷重（仮定 2 kN）の横滑りとモーメントによる軸力。推奨締付トルクを算出（図面未記載）
+- ハウジング（樹脂用タッピンねじ）：下穴・ボス・ねじ込み長をねじメーカーの設計ガイドの目安と比較。締付トルクは成形品で実測して決める
+- 図面のトルク注記は `fastener_check.TORQUE_SPEC` から生成し、計算と図面が同じ値を使う。出図ビルドはステム本体図の報告に締結計算の結果を記録する
+
+## メッシュ収束解析
+
+`python -m scripts.mesh_study` → `out/mesh/メッシュ収束解析報告書.pdf`、収束グラフ、JSON。強度判定の固体 FEA（ステム本体、ハンドルバー右半分）を、全体寸法と曲率分割を √2 ずつ同時に細かくした 4 段階（本番メッシュの 2 段粗い〜1 段細かい）で解き、細かい 3 段から Richardson 外挿（Celik ほか 2008 の手順）で要素寸法 0 の値と GCI を求める。判定に使う値（最大変位、von Mises 99.9% 値）が本番メッシュで外挿値の 5 % 以内なら合格。各段のメッシュ品質（形状品質 q、最小二面角、縦横比）も出す。剛体支持の角部の最大値は特異点で細分化とともに増え続けるため判定に使わない。大きいメッシュは AMG 前処理付き CG で解く（`fea/static.py` `solve_cases(..., solver="amg")`、`pyamg`）。
 
 ## 提出図フロー（出図）
 

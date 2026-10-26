@@ -44,12 +44,10 @@ def _rule(name, ok, value, limit, basis, **kw):
     return {"check": name, "pass": bool(ok), "value": value, "limit": limit, "basis": basis, **kw}
 
 
-def body_fea(p, body, cases=LOAD_CASES, h=2.0):
-    """One mesh, one solve per load case."""
-    from ..fea.static import mesh_shape, solve
+def body_supports(p):
+    """Facet selectors of the body FEA: (fixed, loaded)."""
     d, n, S, B = stem.frame(p)
     Bv = np.array([B.X, B.Y, B.Z])
-    mesh = mesh_shape(body, h)
     rs, rb = p.steerer_d / 2, p.bar_d / 2
 
     def fixed(c):      # steerer bore (the steerer tube holds the stem)
@@ -58,8 +56,16 @@ def body_fea(p, body, cases=LOAD_CASES, h=2.0):
     def bar(c):        # bar bore (the handlebar pushes on it)
         rel = c - Bv[:, None]
         return np.abs(np.hypot(rel[0], rel[2]) - rb) < 0.3
+    return fixed, bar
+
+
+def body_fea(p, body, cases=LOAD_CASES, h=2.0, curvature=12, solver="direct", fields=False):
+    """One mesh, one stiffness factorisation, one back-substitution per load case."""
+    from ..fea.static import mesh_shape, solve_cases
+    mesh = mesh_shape(body, h, curvature)
+    fixed, bar = body_supports(p)
     mat = MATERIALS[p.material]
-    return {lc.name: solve(mesh, mat, fixed, [(bar, lc.force_N)]) for lc in cases}
+    return solve_cases(mesh, mat, fixed, {lc.name: [(bar, lc.force_N)] for lc in cases}, solver, fields)
 
 
 def verify(p: stem.StemParams, fea=True, h=2.0, cases=LOAD_CASES):
