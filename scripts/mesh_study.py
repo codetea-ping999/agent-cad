@@ -43,7 +43,11 @@ def plot(part, r):
     keys = list(r["summary"][cases[0]])
     h = [l["quality"]["h_eff_mm"] for l in r["levels"]]
     prod = [l["h"] for l in r["levels"]].index(r["production_mesh"]["h"])
-    fig, axs = plt.subplots(1, len(keys), figsize=(3.0 * len(keys), 2.8))
+    nr = (len(keys) + 2) // 3
+    fig, axs = plt.subplots(nr, 3, figsize=(9.0, 2.9 * nr), squeeze=False)
+    axs = axs.ravel()
+    for ax in axs[len(keys):]:
+        ax.axis("off")
     for ax, k in zip(axs, keys):
         for c in cases:
             e = r["summary"][c][k]
@@ -55,8 +59,9 @@ def plot(part, r):
         ax.set_title(KEY_JP.get(k, k), fontsize=7.5, family=font)
         ax.set_xlabel("代表要素寸法 h_eff [mm]", fontsize=6.5, family=font)
         ax.tick_params(labelsize=6); ax.grid(alpha=0.3)
-    axs[0].set_ylabel("値 / 外挿値", fontsize=6.5, family=font)
-    axs[-1].legend(fontsize=5, loc="best")
+    for i in range(0, len(keys), 3):
+        axs[i].set_ylabel("値 / 外挿値", fontsize=6.5, family=font)
+    axs[len(keys) - 1].legend(fontsize=6, loc="center left", bbox_to_anchor=(1.05, 0.5))
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, f"{part}_convergence.png"), dpi=150)
     return fig
@@ -110,7 +115,7 @@ def report(parts):
         r = ms.summarise(json.load(open(os.path.join(OUT, f"{part}_study.json"), encoding="utf-8")))
         doc.pagebreak()
         section(doc, part, r)
-        doc.figure(plot(part, r), 62)
+        doc.figure(plot(part, r), 120)
         ok &= r["verdict"]["pass"]
     n = doc.save(os.path.join(OUT, "メッシュ収束解析報告書.pdf"))
     print(f"{OUT}/メッシュ収束解析報告書.pdf ({n} pages): {'PASS' if ok else 'FAIL'}")
