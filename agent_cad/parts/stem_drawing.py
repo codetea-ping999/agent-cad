@@ -12,7 +12,7 @@ from ..drawing.sheet import Sheet, View, A2, A3, text_box, text_width
 from ..drawing.measure import find_cyl, planes
 from ..standards import jis
 from . import stem
-from ..verify.fastener_check import torque_note
+from ..verify.fastener_check import torque_notes
 
 MATERIAL_SPEC = {  # material -> (drawing designation, finish)
     "A6061-T6": ("A6061FD-T6 (JIS H 4140 鍛造品)", "硫酸アルマイト 黒 (JIS H 8601 AA10)"),
@@ -319,7 +319,7 @@ def _body_sheet(p, body, dwg_no, size, k):
     mass = body.volume / 1000 * rho
     _title(sh, p, "ステム 本体 (STEM BODY)", dwg_no or f"{doc_no(p)}-01", mass, scale=_scale_text(k))
     _notes(sh, _common_notes(sh, p, [f"※ φ{_fmt(2 * bar_bore.r)} はフェイスプレートと組み付けた状態で仕上げる (共加工)。",
-                                 torque_note(),
+                                 *torque_notes(),
                                  "図示なき外形形状は3Dモデル (STEP AP242、同図番) による。"]), (16, 106))
     _general_tol_table(sh, (16, 36))
     fb, tb, ab = front.bbox(), top.bbox(), aux.bbox()

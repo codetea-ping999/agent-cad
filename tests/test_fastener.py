@@ -95,10 +95,17 @@ def test_faceplate_needs_about_5_Nm():
     assert fc.calc(dataclasses.replace(j, torque_Nm=(5.0, 6.0)))["pass"]
 
 
-def test_torque_note_follows_the_spec():
-    note = fc.torque_note()
+def test_torque_notes_follow_the_spec():
+    t, bolts = fc.torque_notes()
     (a, b), (c, d) = fc.TORQUE_SPEC["pinch"], fc.TORQUE_SPEC["faceplate"]
-    assert f"{a:g}〜{b:g} N·m" in note and f"{c:g}〜{d:g} N·m" in note
+    assert f"{a:g}〜{b:g} N·m" in t and f"{c:g}〜{d:g} N·m" in t
+    assert "10.9" in bolts
+
+
+def test_stem_joints_pass_with_the_drawing_spec():
+    """AC-1001 rev A: faceplate 5-6 N·m and 10.9 bolts pass every joint check."""
+    r = fc.stem_joints(stem.StemParams(), HandlebarParams())
+    assert r["pass"], r["failed"]
 
 
 def test_bracket_and_housing():

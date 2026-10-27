@@ -7,6 +7,14 @@
    "date": "2026-10-23",
    "fingerprint": "8912026045417712",
    "rev": "-"
+  },
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "フェイスプレート締付5〜6N·m・ボルト10.9",
+   "date": "2026-10-27",
+   "fingerprint": "410d2c528940e7d7",
+   "rev": "A"
   }
  ],
  "AC-1002": [
@@ -57,6 +65,14 @@
    "date": "2026-10-23",
    "fingerprint": "a374c605dd1d27dd",
    "rev": "-"
+  },
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "製品図 AC-1001 改訂Aに追従",
+   "date": "2026-10-27",
+   "fingerprint": "2cf1bf3e4b1d469f",
+   "rev": "A"
   }
  ],
  "AC-5102": [
@@ -67,6 +83,14 @@
    "date": "2026-10-23",
    "fingerprint": "023d0c8df71adb99",
    "rev": "-"
+  },
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "製品図 AC-1001 改訂Aに追従",
+   "date": "2026-10-27",
+   "fingerprint": "bd64add6f0ed0f04",
+   "rev": "A"
   }
  ],
  "AC-5103": [
@@ -77,6 +101,14 @@
    "date": "2026-10-23",
    "fingerprint": "22bd375c903d4ccb",
    "rev": "-"
+  },
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "製品図 AC-1001 改訂Aに追従",
+   "date": "2026-10-27",
+   "fingerprint": "5a1d783315016ff0",
+   "rev": "A"
   }
  ],
  "AC-5201": [

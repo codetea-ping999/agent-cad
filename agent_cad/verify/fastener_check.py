@@ -33,18 +33,22 @@ from ..parts import stem as stem_mod
 
 # tightening torques the drawings state (agent_cad/parts/stem_drawing.py note), N·m per bolt
 # (the bracket's is a recommendation of this calculation: its drawing states none yet)
-TORQUE_SPEC = {"pinch": (5.0, 6.0), "faceplate": (4.0, 5.0), "bracket": (18.0, 22.0)}
+# faceplate 4-5 -> 5-6 N·m in AC-1001 rev A (2026-10-27): 4 N·m with the highest friction
+# left too little clamp force for the bar torque
+TORQUE_SPEC = {"pinch": (5.0, 6.0), "faceplate": (5.0, 6.0), "bracket": (18.0, 22.0)}
 # bolts the calculation assumes: 10.9, not 12.9, for the M5s: in the A6061 stem the
 # pinch thread (7.5 mm engaged) would strip just before a 12.9 bolt breaks (0.997)
 BOLT_SPEC = {"pinch": "M5-10.9", "faceplate": "M5-10.9", "bracket": "M8-8.8"}
 
 
 
-def torque_note():
-    """The tightening-torque note of the stem body drawing, from TORQUE_SPEC (one source
-    for the drawing and this calculation)."""
+def torque_notes():
+    """The fastener notes of the stem body drawing, from TORQUE_SPEC and BOLT_SPEC (one
+    source for the drawing and this calculation)."""
     (a, b), (c, d) = TORQUE_SPEC["pinch"], TORQUE_SPEC["faceplate"]
-    return f"ピンチボルト締結トルク {a:g}〜{b:g} N·m、フェイスプレート {c:g}〜{d:g} N·m (参考)。"
+    grades = sorted({BOLTS[BOLT_SPEC[k]].grade for k in ("pinch", "faceplate")})
+    return [f"締付トルク: ピンチボルト {a:g}〜{b:g} N·m、フェイスプレートボルト {c:g}〜{d:g} N·m (締結計算書 AC-CALC-F01)。",
+            f"締結ボルト: 六角穴付きボルト M5×0.8 (JIS B 1176) 強度区分 {'/'.join(grades)}。"]
 
 
 # PROVISIONAL ISO 4210-5 style torsional security torques (N·m)
