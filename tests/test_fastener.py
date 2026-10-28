@@ -60,6 +60,24 @@ def test_compliant_clamp_side_loses_less_preload_to_embedding():
     assert soft["load_factor"]["Phi_n"] > stiff["load_factor"]["Phi_n"]
 
 
+def test_cyclic_peak_counts_in_the_clamp_force():
+    base = calc(_joint(F_req_N=3000.0))["preload"]["F_residual_min"]
+    peak = calc(_joint(F_req_N=3000.0, FA_alt_N=1000.0))
+    assert peak["preload"]["F_residual_min"] < base
+    sep = calc(_joint(F_req_N=3000.0, FA_alt_N=1000.0, alt_with_req=False))
+    assert sep["preload"]["F_residual_min"] == base
+    assert calc(_joint(FA_alt_N=1000.0))["torque_window_Nm"]["min"] > calc(_joint())["torque_window_Nm"]["min"]
+
+
+def test_drop_load_cases_count_in_the_bar_torque():
+    """Longer drops move the drop load point behind the clamp: the static drop case then
+    sets the torque the faceplate must hold."""
+    short = fc.bar_torque_demand(stem.StemParams(), HandlebarParams())
+    long_ = fc.bar_torque_demand(stem.StemParams(), dataclasses.replace(HandlebarParams(), drop_len=175))
+    assert long_["static_peak_Nm"] > short["static_peak_Nm"]
+    assert long_["static_peak_Nm"] > 2 * 1.0 * abs(long_["drop_point_mm"][0]) * 0.99
+
+
 def test_short_engagement_strips_before_the_bolt_breaks():
     assert not calc(_joint(engagement_mm=4.0))["pass"]
     assert calc(_joint(engagement_mm=10.0))["rules"][-1]["pass"]

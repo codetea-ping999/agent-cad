@@ -75,6 +75,10 @@ def richardson(h, f, Fs=1.25):
                 "gci_fine_pct": round(Fs * abs(e21 / f1) * 100, 2) if f1 else 0.0}
     if abs(e32) < 1e-12 * max(abs(f2), 1e-30) or e32 * e21 < 0:
         return {**out, "status": "oscillating", "p": None, "f_extrap": None, "gci_fine_pct": None}
+    if abs(e21) > abs(e32) * 0.98:
+        # the change does not shrink: no asymptotic range (singular peak, or too coarse)
+        p0 = abs(math.log(abs(e32 / e21))) / math.log(r21)
+        return {**out, "status": "diverging", "p": round(p0, 2), "f_extrap": None, "gci_fine_pct": None}
     s = 1.0 if e32 / e21 > 0 else -1.0
     p = abs(math.log(abs(e32 / e21))) / math.log(r21)
     for _ in range(100):                           # Celik eq. (3)-(4): fixed point for unequal ratios
@@ -83,9 +87,6 @@ def richardson(h, f, Fs=1.25):
         if abs(p_new - p) < 1e-10:
             break
         p = p_new
-    if abs(e21) > abs(e32) * 0.98:
-        # the change does not shrink: no asymptotic range (singular peak, or too coarse)
-        return {**out, "status": "diverging", "p": round(p, 2), "f_extrap": None, "gci_fine_pct": None}
     f_ext = (r21 ** p * f1 - f2) / (r21 ** p - 1)
     gci = Fs * abs(e21 / f1) / (r21 ** p - 1) * 100
     return {**out, "status": "converging", "p": round(p, 2), "f_extrap": round(f_ext, 4),

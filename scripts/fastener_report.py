@@ -108,7 +108,7 @@ def write_stem(doc, name, rep):
         f"摩擦で伝えられるハンドル回転トルク (最小残留締付力時): {cap_f['bar_torque_Nm']:g} N·m。"
         f" 要求: 試験 {cap_f['test_Nm']:g} N·m (暫定, 安全率 {cap_f['slip_safety_test']:g})、"
         f"フード同相疲労ピーク {cap_f['fatigue_peak_Nm']:g} N·m (安全率 {cap_f['slip_safety_fatigue']:g})、"
-        f"静的フード前方荷重 {cap_f['static_hood_peak_Nm']:g} N·m。",
+        f"静的荷重 (フード前方・ドロップ下向き) ピーク {cap_f['static_peak_Nm']:g} N·m。",
         f"フェイスプレートのたわみ (FEA, 1 本あたり): {fj['compliance']['faceplate_fea_mm_per_N'] * 1e6:.2f} μm/kN "
         "(バー穴固定、座ぐり底に軸力)。VDI の円錐モデルに含まれない曲げ分を被締結側コンプライアンスに加算。"
         if fj["compliance"].get("faceplate_fea_mm_per_N") else "フェイスプレートの曲げは考慮せず (円錐モデルのみ: 安全側)。"])

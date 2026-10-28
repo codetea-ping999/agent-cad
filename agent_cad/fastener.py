@@ -110,6 +110,7 @@ class Joint:
     FA_static_N: float = 0.0                 # axial working load per bolt, static maximum
     FA_alt_N: float = 0.0                    # axial working load per bolt that cycles 0 .. FA_alt
     F_req_N: float = 0.0                     # residual clamp force per bolt the function needs
+    alt_with_req: bool = True                # the cyclic load peaks while F_req is needed (same load case)
     F_req_basis: str = ""
     nu: float = 0.9                          # utilisation of Rp0.2 allowed at assembly
     SF_fatigue: float = 1.2
@@ -220,6 +221,11 @@ def strip_area(b: Bolt, m):
     return 0.9 * math.pi * b.d * m * (0.5 + (b.d - D2) * math.tan(math.radians(30)) / b.P)
 
 
+def _FA_with_req(j: Joint):
+    """Working load that acts while the required clamp force F_req is needed."""
+    return max(j.FA_static_N, j.FA_alt_N if j.alt_with_req else 0.0)
+
+
 def calc(j: Joint):
     b = j.bolt
     dS, dS_parts = bolt_compliance(j)
@@ -234,7 +240,9 @@ def calc(j: Joint):
     e = EMBED_UM[j.rz_um]
     fZ_um = e["thread"] + e["bearing"] * (1 if j.tapped else 2) + e["inner"] * j.interfaces + j.embed_extra_um
     FZ = fZ_um / 1000 / (dS + dP)
-    F_res = FM_min - FZ - (1 - phi_n) * j.FA_static_N
+    FA_max = max(j.FA_static_N, j.FA_alt_N)          # peak working load: static or the cyclic peak
+    F_res = FM_min - FZ - (1 - phi_n) * _FA_with_req(j)
+    F_res_alt = FM_min - FZ - (1 - phi_n) * FA_max    # the joint must not open at the cyclic peak either
     SG = F_res / j.F_req_N if j.F_req_N > 0 else float("inf")
     # bolt at assembly (worst: highest preload at the lowest thread friction... and the highest
     # friction at that torque for the torsion part: VDI uses mu_G,min with F_M,max)
@@ -242,7 +250,7 @@ def calc(j: Joint):
     FMzul = FM_allowed(b, j.mu_G[0], j.nu)
     nu_used = s_red_M / b.Rp02_MPa
     # in service: torsion relaxed to half (k_tau = 0.5), full working load added
-    FS_max = FM_max + phi_n * j.FA_static_N
+    FS_max = FM_max + phi_n * FA_max
     d0 = (b.d2 + b.d3) / 2
     s_z = FS_max / (math.pi / 4 * d0 ** 2)
     t_el = assembly_stress(b, FM_max, j.mu_G[0], plastic=False)[2]
@@ -253,7 +261,7 @@ def calc(j: Joint):
     SD = sigma_ASV / sigma_a if sigma_a > 0 else float("inf")
     # head bearing
     Ap = math.pi / 4 * (b.head_d ** 2 - j.hole_d ** 2)
-    p_max = (FM_max + phi_n * j.FA_static_N) / Ap
+    p_max = (FM_max + phi_n * FA_max) / Ap
     pG = 0.9 * j.bearing_Rm_MPa
     # thread stripping (internal thread)
     A_strip = strip_area(b, j.engagement_mm)
@@ -264,9 +272,10 @@ def calc(j: Joint):
               f"von Mises at F_M,max / Rp0.2 ({b.Rp02_MPa:g} MPa), VDI 2230 R8"),
         _rule("service_stress", s_red_B <= b.Rp02_MPa, round(s_red_B, 0), b.Rp02_MPa,
               "von Mises in service (k_tau = 0.5) <= Rp0.2, VDI 2230 R8"),
-        _rule("clamp_force", F_res >= j.F_req_N, round(F_res, 0), round(j.F_req_N, 0),
-              "F_M,min - F_Z - (1 - Phi_n) F_A >= required per bolt (" + j.F_req_basis + ")",
-              safety=round(SG, 2)),
+        _rule("clamp_force", F_res >= j.F_req_N and F_res_alt >= 0, round(F_res, 0), round(j.F_req_N, 0),
+              "F_M,min - F_Z - (1 - Phi_n) F_A >= required per bolt (" + j.F_req_basis + ")"
+              + ("" if j.alt_with_req else "; at the cyclic peak (separate load case) > 0"),
+              safety=round(SG, 2), residual_at_cyclic_peak=round(F_res_alt, 0)),
         _rule("fatigue", SD >= j.SF_fatigue, round(SD, 2) if SD != float("inf") else "inf", j.SF_fatigue,
               f"sigma_ASV {sigma_ASV:.0f} MPa / sigma_a, VDI 2230 R9"),
         _rule("head_bearing", p_max * j.SF_bearing <= pG, round(p_max, 0), round(pG, 0),
@@ -313,7 +322,7 @@ def torque_window(j: Joint, dS=None, dP=None, phi_n=None, fZ_um=None):
         fZ_um = e["thread"] + e["bearing"] * (1 if j.tapped else 2) + e["inner"] * j.interfaces + j.embed_extra_um
     dKm = (b.head_d + j.hole_d) / 2
     FZ = fZ_um / 1000 / (dS + dP)
-    F_need = j.F_req_N + FZ + (1 - phi_n) * j.FA_static_N
+    F_need = max(j.F_req_N + FZ + (1 - phi_n) * _FA_with_req(j), FZ + (1 - phi_n) * max(j.FA_static_N, j.FA_alt_N))
     M_lo = F_need * torque_factor(b, dKm, j.mu_G[1], j.mu_K[1]) / 1000
     M_hi = FM_allowed(b, j.mu_G[0], j.nu) * torque_factor(b, dKm, j.mu_G[0], j.mu_K[0]) / 1000
     return dict(min=round(M_lo, 2), max=round(M_hi, 2), feasible=M_lo <= M_hi)

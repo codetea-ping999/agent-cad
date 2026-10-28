@@ -15,6 +15,7 @@ level. The largest meshes are solved with AMG-preconditioned CG (agent_cad/fea/s
 Results:
   max_disp_mm           largest displacement: smooth, converges fast
   vm_p999_MPa           99.9th percentile of element peak von Mises: the checked value
+  vm_check_MPa          handlebar: max(vm_p999, vm_p999_away), the value handlebar_verify checks
   vm_peak_away_MPa      largest element von Mises outside the support zone
   vm_max_MPa            largest element value anywhere: includes the re-entrant edge of the
                         rigid support, which is singular (grows without bound on refinement);
@@ -63,8 +64,22 @@ def _summarise(rows, prod_index, keys):
     return out
 
 
+def _governing(r):
+    """The handlebar check uses max(vm_p999, vm_p999_away) (handlebar_verify): check the
+    convergence of that value itself. Fills it in for studies saved before it was added."""
+    if "vm_p999_away_MPa" not in r["keys"]:
+        return
+    for l in r["levels"]:
+        for res in l["results"].values():
+            res["vm_check_MPa"] = max(res["vm_p999_MPa"], res["vm_p999_away_MPa"])
+    if "vm_check_MPa" not in r["keys"]:
+        r["keys"].insert(r["keys"].index("vm_p999_away_MPa") + 1, "vm_check_MPa")
+    r["checked"] = ["max_disp_mm", "vm_check_MPa"]
+
+
 def summarise(r):
     """(Re)compute the convergence summary and the verdict from the levels of a study."""
+    _governing(r)
     hs = [l["h"] for l in r["levels"]]
     ph = r["production_mesh"]["h"]
     prod = min(range(len(hs)), key=lambda i: abs(hs[i] - ph))
@@ -143,6 +158,6 @@ def handlebar_study(p=None, lv=None, cases=hv.LOAD_CASES, log=print):
     return summarise({"part": "handlebar (right half)", "params": hb.asdict(p),
                       "production_mesh": dict(h=BAR_PROD[0], curvature=BAR_PROD[1]), "levels": rows,
                       "keys": ["max_disp_mm", "vm_p999_MPa", "vm_p999_away_MPa", "vm_peak_away_MPa", "vm_max_MPa"],
-                      "checked": ["max_disp_mm", "vm_p999_away_MPa"],
+                      "checked": ["max_disp_mm", "vm_check_MPa"],
                       "notes": [f"ステムクランプ端から {hv.STEM_CLAMP_W / 2 + 3:g} mm (y) 以内は away 値から除外 (剛体クランプ端の特異点)。",
-                      "判定に使う値は solid_fea と同じ max(vm_p999, vm_p999_away)。"]})
+                      "判定に使う値は solid_fea と同じ max(vm_p999, vm_p999_away) (vm_check)。"]})

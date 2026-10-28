@@ -101,6 +101,8 @@ def pinch_joint(p, bolt=None, torque=None):
               # the stem's forward-bending fatigue moment at the steerer clamp, as a couple over the
               # clamp height taken by one bolt (upper bound of the slot-opening load)
               FA_alt_N=_stem_fatigue_N(p) * p.length / p.stack_h,
+              # F_req comes from the steerer torsion test, a separate test from the bending fatigue
+              alt_with_req=False,
               F_req_N=F_req,
               F_req_basis=f"ステアラ ねじり {T_STEERER_TEST:g} N·m (暫定) × SG {SG_SLIP_STATIC} / (μ {MU_CLAMP} · π · r {r:g} mm) / {n}本")
     return j
@@ -168,7 +170,7 @@ def faceplate_joint(p, bar=None, bolt=None, torque=None, fea_compliance=None):
               FA_alt_N=need["fatigue_pull_N"] / n,
               F_req_N=F_req,
               F_req_basis=(f"ハンドル回転 max(試験 {need['test_Nm']:g} N·m (暫定) × SG {SG_SLIP_STATIC}, "
-                           f"疲労ピーク {need['fatigue_peak_Nm']:.0f} N·m, 静的フード {need.get('static_peak_Nm', 0.0):.0f} N·m × SG {SG_SLIP_FATIGUE}) / "
+                           f"疲労ピーク {need['fatigue_peak_Nm']:.0f} N·m, 静的ピーク {need.get('static_peak_Nm', 0.0):.0f} N·m × SG {SG_SLIP_FATIGUE}) / "
                            f"(μ {MU_CLAMP} · 8/π · r {r:g} mm) / {n}本"))
     return j, need
 
@@ -181,9 +183,10 @@ def _cone_only(b, t, E, DA, dh):
 
 def bar_torque_demand(p, bar=None):
     """Bar torques and pulls at the stem from the handlebar's load cases: the provisional
-    torsion test torque, the peak torque of the in-phase hood fatigue case (both hands
-    push down on the hoods ahead of the clamp), and the forward pull of the static hood
-    case (taken by the faceplate bolts)."""
+    torsion test torque, the peak torque of the in-phase fatigue cases (both hands push
+    down ahead of or behind the clamp), the peak torque of the static cases (hoods and
+    drops), and the forward pull of the static cases (taken by the faceplate bolts).
+    Each case acts at its own load point."""
     out = {"test_Nm": T_BAR_TEST, "fatigue_peak_Nm": 0.0, "forward_pull_N": 0.0, "fatigue_pull_N": 0.0}
     if bar is None:
         return out
@@ -192,11 +195,12 @@ def bar_torque_demand(p, bar=None):
     from . import handlebar_verify as hv
     sol = hb.solve(bar)
     segs = {g.name: g for g in hb.path(bar, 1, sol)}
-    nm, s = hv.load_points(bar, sol)["hoods"]
-    q = np.array(segs[nm].point(s)[0]) + np.array(hv.HOOD_OFFSET)
+    pts = {}
+    for where, (nm, s) in hv.load_points(bar, sol).items():
+        pts[where] = np.array(segs[nm].point(s)[0]) + (np.array(hv.HOOD_OFFSET) if where == "hoods" else 0.0)
+    out["static_peak_Nm"] = 0.0
     for lc in hv.LOAD_CASES:
-        if lc.where != "hoods":
-            continue
+        q = pts[lc.where]
         F = np.array(lc.force_N)
         My = q[2] * F[0] - q[0] * F[2]                        # about the bar axis (Y), one side
         both = 2 if lc.phase > 0 else 0                        # out of phase: the two sides cancel
@@ -205,8 +209,9 @@ def bar_torque_demand(p, bar=None):
             out["fatigue_pull_N"] = max(out["fatigue_pull_N"], float(max(F[0], 0.0)) * 2)
         else:
             out["forward_pull_N"] = max(out["forward_pull_N"], float(max(F[0], 0.0)) * 2)
-            out["static_peak_Nm"] = max(out.get("static_peak_Nm", 0.0), float(abs(My)) * both / 1000)
-    out["hood_point_mm"] = [round(float(c), 1) for c in q]
+            out["static_peak_Nm"] = max(out["static_peak_Nm"], float(abs(My)) * both / 1000)
+    out["hood_point_mm"] = [round(float(c), 1) for c in pts["hoods"]]
+    out["drop_point_mm"] = [round(float(c), 1) for c in pts["drops"]]
     return out
 
 
@@ -233,7 +238,7 @@ def stem_joints(p, bar=None, bolt=None, fea=True, faceplate=None):
     capf = MU_CLAMP * 8 / math.pi * fj.n * fr["preload"]["F_residual_min"] * r_b / 1000
     fr["capacity"] = {"bar_torque_Nm": round(capf, 1), "test_Nm": need["test_Nm"],
                       "fatigue_peak_Nm": round(need["fatigue_peak_Nm"], 1),
-                      "static_hood_peak_Nm": round(need.get("static_peak_Nm", 0.0), 1),
+                      "static_peak_Nm": round(need.get("static_peak_Nm", 0.0), 1),
                       "slip_safety_test": round(capf / need["test_Nm"], 2),
                       "slip_safety_fatigue": round(capf / need["fatigue_peak_Nm"], 2) if need["fatigue_peak_Nm"] else None,
                       "hood_point_mm": need.get("hood_point_mm")}

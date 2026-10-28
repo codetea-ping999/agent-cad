@@ -22,6 +22,7 @@ OUT = os.path.join("out", "mesh")
 CASE = {"stem": "stem90_6061", "handlebar": "drop420_7075"}
 TITLE = {"stem": "ステム本体 (AC-1001, stem90_6061)", "handlebar": "ハンドルバー 右半分 (AC-1301, drop420_7075)"}
 KEY_JP = {"max_disp_mm": "最大変位 mm", "vm_p999_MPa": "von Mises 99.9%値 MPa", "vm_p999_away_MPa": "同 クランプ端除外 MPa",
+          "vm_check_MPa": "判定値 max(上2つ) MPa",
           "vm_peak_away_MPa": "支持部以外の最大 MPa", "vm_max_MPa": "全体最大 (特異点含む) MPa"}
 STATUS_JP = {"converging": "収束", "converged": "収束 (変化なし)", "oscillating": "振動", "diverging": "発散 (特異)"}
 

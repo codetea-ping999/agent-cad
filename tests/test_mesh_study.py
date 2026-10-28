@@ -20,6 +20,21 @@ def test_richardson_flags_a_singular_peak():
     assert richardson(h, [1.0, 1.001, 1.002, 1.003])["status"] == "converged"     # < 1 % steps
 
 
+def test_richardson_equal_changes_are_diverging():
+    r = richardson([4, 2, 1], [100, 110, 120])
+    assert r["status"] == "diverging" and r["f_extrap"] is None
+
+
+def test_handlebar_checks_the_governing_stress():
+    """handlebar_verify accepts on max(vm_p999, vm_p999_away): the study checks that value."""
+    lv = [dict(h=h, results={"c": dict(max_disp_mm=1.0, vm_p999_MPa=a, vm_p999_away_MPa=b)},
+               quality=dict(h_eff_mm=h)) for h, a, b in [(4, 100, 90), (2.8, 140, 91), (2, 180, 91.5), (1.4, 220, 91.6)]]
+    r = ms.summarise({"levels": lv, "production_mesh": dict(h=2), "keys": ["max_disp_mm", "vm_p999_MPa", "vm_p999_away_MPa"],
+                      "checked": ["max_disp_mm", "vm_p999_away_MPa"]})
+    assert "vm_check_MPa" in r["checked"]
+    assert not r["verdict"]["pass"]
+
+
 def test_mesh_quality_of_regular_and_flat_tets():
     from skfem import MeshTet
     reg = np.array([[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]], float).T
