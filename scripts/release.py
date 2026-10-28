@@ -76,6 +76,17 @@ def handlebar_case(case):
     return p, tp, bar, rep, tools, prep, tb.tool_parts(p, tp, tools, make_handlebar.SETUP)
 
 
+@lru_cache(None)
+def fastener_case(case):
+    """Fastener calculation of a stem case with the registered handlebar in its bar clamp
+    (scripts/fastener_report.py writes the full calculation sheet). A gate of the stem
+    body drawing, whose notes state the bolts and torques it checks."""
+    from agent_cad.verify import fastener_check as fc
+    r = fc.stem_joints(make_stem.CASES[case], make_handlebar.CASES["drop420_7075"])
+    return dict(pass_=bool(r["pass"]), failed=r["failed"], torque_notes=fc.torque_notes(),
+                torque_window_Nm={k: j["torque_window_Nm"] for k, j in r["joints"].items()})
+
+
 def _design(rep):
     return dict(pass_=bool(rep["pass"]), failed=list(rep.get("failed", [])))
 
@@ -87,7 +98,10 @@ def g_stem_body(it, ctx):
     p, b, f, chk = stem_case(it["case"])
     sh = stem_drawing.body_sheet(p, b, dwg_no=it["number"])
     ps = PartSpec(f"{it['number']}_STEM_BODY", b, make_stem.BODY_RGB, p.material, stem.density(p), pmi=pmi.from_sheet(sh))
-    return dict(sheet=sh, parts=[ps], assembly=None, shape=b, design=dict(pass_=chk["pass"], failed=[]), kind="製品")
+    fz = fastener_case(it["case"])
+    # the body drawing states the bolts and torques: the fastener calculation must pass for them
+    return dict(sheet=sh, parts=[ps], assembly=None, shape=b, kind="製品", fastener=fz,
+                design=dict(pass_=chk["pass"] and fz["pass_"], failed=["fastener." + f for f in fz["failed"]]))
 
 
 def g_stem_faceplate(it, ctx):
@@ -408,7 +422,7 @@ def build(only=None, write_history=False, out=OUT):
                    product=it.get("product"), product_rev=ctx["revs"].get(it.get("product")), sheet=f"{'A3' if sh.size == A3 else 'A2'}",
                    scale=sh.meta["title_block"]["尺度"], gates=gates, pass_=ok, revision_error=st["error"],
                    design_failed=g["design"]["failed"], drawing_failed=[c["check"] for c in post["checks"] if not c["pass"]],
-                   pmi=pmichk, step_exchange=xchk["pass"],
+                   pmi=pmichk, step_exchange=xchk["pass"], fastener=g.get("fastener"),
                    files=[stem_ + e for e in (".pdf", ".dxf", ".step")])
         json.dump(dict(rep, drawing=post, step=xchk), open(os.path.join(out, stem_ + "_report.json"), "w", encoding="utf-8"),
                   ensure_ascii=False, indent=1, default=str)

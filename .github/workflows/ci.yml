@@ -14,6 +14,7 @@ jobs:
       - run: python -m scripts.make_forging
       - run: python -m scripts.make_diecast
       - run: python -m scripts.make_molding
+      - run: python -m scripts.fastener_report
       - run: python -m scripts.release
       - uses: actions/upload-artifact@v4
         if: always()
