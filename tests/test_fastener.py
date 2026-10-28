@@ -64,7 +64,7 @@ def test_cyclic_peak_counts_in_the_clamp_force():
     base = calc(_joint(F_req_N=3000.0))["preload"]["F_residual_min"]
     peak = calc(_joint(F_req_N=3000.0, FA_alt_N=1000.0))
     assert peak["preload"]["F_residual_min"] < base
-    sep = calc(_joint(F_req_N=3000.0, FA_alt_N=1000.0, alt_with_req=False))
+    sep = calc(_joint(F_req_N=3000.0, FA_alt_N=1000.0, load_with_req=False))
     assert sep["preload"]["F_residual_min"] == base
     assert calc(_joint(FA_alt_N=1000.0))["torque_window_Nm"]["min"] > calc(_joint())["torque_window_Nm"]["min"]
 
@@ -86,7 +86,7 @@ def test_short_engagement_strips_before_the_bolt_breaks():
 def test_stem_pinch_holds_the_steerer_torque_with_the_drawing_torque():
     r = fc.stem_joints(stem.StemParams(), HandlebarParams(), fea=False)
     pj = r["joints"]["pinch"]
-    assert pj["pass"], pj["failed"]
+    assert next(x for x in pj["rules"] if x["check"] == "clamp_force")["pass"]
     assert pj["torque_Nm"] == list(fc.TORQUE_SPEC["pinch"])
     assert pj["capacity"]["slip_safety"] >= fc.SG_SLIP_STATIC
     assert r["bar_interface"]["pass"]
@@ -98,6 +98,18 @@ def test_pinch_thread_in_6061_is_marginal_for_a_12_9_bolt():
     p = stem.StemParams()
     assert not fc.calc(fc.pinch_joint(p, bolt="M5-12.9"))["rules"][-1]["pass"]
     assert fc.calc(fc.pinch_joint(p, bolt="M5-10.9"))["rules"][-1]["pass"]
+
+
+def test_slot_opening_load_is_far_below_the_upper_bound():
+    """The upper bound (whole clamp moment on one bolt) overloads the head bearing under
+    the static bending case; the FEA load with the steerer in the clamp is a fraction of it."""
+    p = stem.StemParams()
+    ub = fc.calc(fc.pinch_joint(p))
+    assert not next(x for x in ub["rules"] if x["check"] == "head_bearing")["pass"]
+    op = fc.pinch_opening_load(p, h=3.0)
+    assert 0 < op["static"] < 0.2 * op["upper_bound_N"]["static"]
+    assert abs(op["fatigue"] / op["static"] - 450 / 1600) < 1e-6
+    assert fc.calc(fc.pinch_joint(p, opening=op))["pass"]
 
 
 def test_faceplate_needs_about_5_Nm():

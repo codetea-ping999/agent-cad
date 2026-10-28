@@ -110,7 +110,7 @@ class Joint:
     FA_static_N: float = 0.0                 # axial working load per bolt, static maximum
     FA_alt_N: float = 0.0                    # axial working load per bolt that cycles 0 .. FA_alt
     F_req_N: float = 0.0                     # residual clamp force per bolt the function needs
-    alt_with_req: bool = True                # the cyclic load peaks while F_req is needed (same load case)
+    load_with_req: bool = True               # the working loads act while F_req is needed (same load case)
     F_req_basis: str = ""
     nu: float = 0.9                          # utilisation of Rp0.2 allowed at assembly
     SF_fatigue: float = 1.2
@@ -223,7 +223,7 @@ def strip_area(b: Bolt, m):
 
 def _FA_with_req(j: Joint):
     """Working load that acts while the required clamp force F_req is needed."""
-    return max(j.FA_static_N, j.FA_alt_N if j.alt_with_req else 0.0)
+    return max(j.FA_static_N, j.FA_alt_N) if j.load_with_req else 0.0
 
 
 def calc(j: Joint):
@@ -242,7 +242,7 @@ def calc(j: Joint):
     FZ = fZ_um / 1000 / (dS + dP)
     FA_max = max(j.FA_static_N, j.FA_alt_N)          # peak working load: static or the cyclic peak
     F_res = FM_min - FZ - (1 - phi_n) * _FA_with_req(j)
-    F_res_alt = FM_min - FZ - (1 - phi_n) * FA_max    # the joint must not open at the cyclic peak either
+    F_res_alt = FM_min - FZ - (1 - phi_n) * FA_max    # the joint must not open at the peak load either
     SG = F_res / j.F_req_N if j.F_req_N > 0 else float("inf")
     # bolt at assembly (worst: highest preload at the lowest thread friction... and the highest
     # friction at that torque for the torsion part: VDI uses mu_G,min with F_M,max)
@@ -274,8 +274,8 @@ def calc(j: Joint):
               "von Mises in service (k_tau = 0.5) <= Rp0.2, VDI 2230 R8"),
         _rule("clamp_force", F_res >= j.F_req_N and F_res_alt >= 0, round(F_res, 0), round(j.F_req_N, 0),
               "F_M,min - F_Z - (1 - Phi_n) F_A >= required per bolt (" + j.F_req_basis + ")"
-              + ("" if j.alt_with_req else "; at the cyclic peak (separate load case) > 0"),
-              safety=round(SG, 2), residual_at_cyclic_peak=round(F_res_alt, 0)),
+              + ("" if j.load_with_req else "; at the peak working load (separate load case) > 0"),
+              safety=round(SG, 2), residual_at_peak_load=round(F_res_alt, 0)),
         _rule("fatigue", SD >= j.SF_fatigue, round(SD, 2) if SD != float("inf") else "inf", j.SF_fatigue,
               f"sigma_ASV {sigma_ASV:.0f} MPa / sigma_a, VDI 2230 R9"),
         _rule("head_bearing", p_max * j.SF_bearing <= pG, round(p_max, 0), round(pG, 0),

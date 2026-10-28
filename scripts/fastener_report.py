@@ -85,10 +85,20 @@ def stem_case(name):
     p = make_stem.CASES[name]
     bar = make_handlebar.CASES[BAR_CASE]
     rep = fc.stem_joints(p, bar)
-    alt = fc.calc(fc.pinch_joint(p, bolt="M5-12.9"))
+    op = rep["joints"]["pinch"]["slot_opening"]
+    alt = fc.calc(fc.pinch_joint(p, bolt="M5-12.9", opening=op if "static" in op else None))
     rep["alternatives"] = {"pinch_with_12.9": {"pass": alt["pass"], "failed": alt["failed"],
                                                "F_strip": alt["stress"]["F_strip"], "F_break": alt["stress"]["F_break"]}}
     return rep
+
+
+def _opening_note(op):
+    if "static" not in op:
+        return f"スリットを開く軸力: {op['model']}。"
+    ub = op["upper_bound_N"]
+    return (f"スリットを開く軸力 (FEA, {op['model']}): 静的前方曲げ {op['static']:.0f} N、疲労 {op['fatigue']:.0f} N "
+            f"(1 本あたり、上側ボルト)。曲げモーメントを締結高さで割って 1 本で受ける上限見積り "
+            f"({ub['static']:g} / {ub['fatigue']:g} N) に対し、大半はステアラとの接触で受ける。")
 
 
 def write_stem(doc, name, rep):
@@ -99,6 +109,7 @@ def write_stem(doc, name, rep):
     joint_section(doc, "pinch", pj, [
         f"摩擦で伝えられるステアラまわりトルク (最小残留締付力時): {cap_p['steerer_torque_Nm']:g} N·m "
         f"(要求 {cap_p['required_Nm']:g} N·m, 安全率 {cap_p['slip_safety']:g})。",
+        _opening_note(pj["slot_opening"]),
         f"ステアラ面圧 (最大締付時, 薄肉リング近似): {rep['joints']['pinch']['steerer_pressure_MPa']:g} MPa。"
         "カーボンコラムの場合はメーカー許容値 (締付トルク上限) を優先すること。",
         "12.9 ボルトの場合: " + ("全項目合格。" if rep["alternatives"]["pinch_with_12.9"]["pass"] else

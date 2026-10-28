@@ -57,6 +57,8 @@ T_BAR_TEST = 60.0             # handlebar in the stem, about the bar axis
 SG_SLIP_STATIC = 1.2          # VDI 2230: slip safety under static transverse load
 SG_SLIP_FATIGUE = 1.0         # no slip at the peak of the (provisional) fatigue load
 MU_CLAMP = 0.15               # aluminium clamp on aluminium bar / steerer, clean, no grease (minimum)
+STEERER_WALL = 1.8            # fork steerer tube wall in the slot-opening FEA (aluminium steerer, assumed)
+STEERER_FREE = 30.0           # steerer length below / above the clamp in that FEA; held at the bottom (headset)
 FP_CBORE_DEPTH = 2.5          # faceplate counterbore depth (agent_cad/parts/stem.py build())
 BAR_SF_YIELD = 1.2            # bar clamp section, hoop compression under the clamp pressure
 
@@ -74,12 +76,65 @@ def _slotted_ring_compliance(r_mean, t, w, E):
     return 2 * math.pi * r_mean / (E * t * w)
 
 
-def _stem_fatigue_N(p):
+def _stem_fatigue_N(p, kind="fatigue"):
+    """Largest forward bending (downward) load of the stem's load cases of a kind."""
     from .stem_verify import LOAD_CASES
-    return max(abs(min(lc.force_N)) for lc in LOAD_CASES if lc.kind == "fatigue")
+    return max(-lc.force_N[2] for lc in LOAD_CASES if lc.kind == kind)
 
 
-def pinch_joint(p, bolt=None, torque=None):
+def pinch_opening_load(p, body=None, h=2.0):
+    """Axial working load per pinch bolt from the stem's forward bending, by FEA: the body
+    bonded to an elastic steerer tube (clamped, no slip) that is held at its bottom end,
+    the bar bore loaded. With the bolts left out, the slot opening at each bolt line under
+    the load, and the slot compliance matrix under unit pairs of forces on the slot faces
+    around each bolt, give the force each bolt must carry to keep the slot closed:
+    F = C^-1 delta. Returns {"static", "fatigue"} N per bolt (the larger of the two bolts,
+    tension positive) and the details."""
+    import numpy as np
+    from build123d import Cylinder, Pos, Align
+    from ..fea.static import mesh_shape, _assemble, linear_solver
+    from .stem_verify import body_supports
+    if body is None:
+        body, _ = stem_mod.build(p)
+    rs = p.steerer_d / 2
+    L = p.stack_h + 2 * STEERER_FREE
+    cyl = lambda r: Pos(0, 0, -STEERER_FREE) * Cylinder(r, L, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    mesh = mesh_shape(body.fuse(cyl(rs + 0.05) - cyl(rs - STEERER_WALL)), h)
+    bx = -(rs + p.pinch_wall + p.bolt_clear_d / 2)                 # pinch bolt axis (along Y) at x = bx
+    zs = (p.stack_h / 2 - p.pinch_pitch / 2, p.stack_h / 2 + p.pinch_pitch / 2)
+
+    def face(k, sgn):                                                # slot face around bolt k
+        def sel(c):
+            r = np.hypot(c[0] - bx, c[2] - zs[k])
+            return ((np.abs(c[1] - sgn * p.slot_w / 2) < 0.05) & (r > p.bolt_clear_d / 2 - 0.05)
+                    & (r < p.cbore_d / 2 + p.ear_end_margin))
+        return sel
+    _, bar = body_supports(p)
+    ib, K, D, rhs = _assemble(mesh, MATERIALS[p.material], lambda c: c[2] < -STEERER_FREE + 0.05)
+    solve = linear_solver(ib, K, D)
+    bf = mesh.boundary_facets()
+    fc_ = mesh.p[:, mesh.facets[:, bf]].mean(axis=1)
+    nodes = {(k, s): np.unique(mesh.facets[:, bf[face(k, s)(fc_)]].ravel()) for k in (0, 1) for s in (1, -1)}
+
+    def opening(f):
+        uy = solve(f)[ib.nodal_dofs[1]]
+        return np.array([uy[nodes[(k, 1)]].mean() - uy[nodes[(k, -1)]].mean() for k in (0, 1)])
+    F = 1000.0
+    C = np.column_stack([opening(rhs(face(k, 1), (0.0, F, 0.0)) + rhs(face(k, -1), (0.0, -F, 0.0))) / F
+                         for k in (0, 1)])
+    out = {"model": f"本体+ステアラ管 (肉厚 {STEERER_WALL:g} mm, 下端固定) 一体, h {h:g} mm", "per_bolt_N": {}}
+    for kind in ("static", "fatigue"):
+        Fz = _stem_fatigue_N(p, kind)
+        FA = np.linalg.solve(C, opening(rhs(bar, (0.0, 0.0, -Fz))))
+        out["per_bolt_N"][kind] = [round(float(x), 1) for x in FA]
+        out[kind] = max(0.0, float(FA.max()))
+    out["upper_bound_N"] = {k: round(_stem_fatigue_N(p, k) * p.length / p.stack_h, 1) for k in ("static", "fatigue")}
+    return out
+
+
+def pinch_joint(p, bolt=None, torque=None, opening=None):
+    """opening: pinch_opening_load() result; None takes the upper bound (the whole clamp
+    moment as a couple over the clamp height on one bolt)."""
     mat = MATERIALS[p.material]
     b = BOLTS[bolt or BOLT_SPEC["pinch"]]
     n = 2
@@ -100,9 +155,10 @@ def pinch_joint(p, bolt=None, torque=None):
               embed_extra_um=2 * math.pi * e,
               # the stem's forward-bending fatigue moment at the steerer clamp, as a couple over the
               # clamp height taken by one bolt (upper bound of the slot-opening load)
-              FA_alt_N=_stem_fatigue_N(p) * p.length / p.stack_h,
-              # F_req comes from the steerer torsion test, a separate test from the bending fatigue
-              alt_with_req=False,
+              FA_static_N=opening["static"] if opening else _stem_fatigue_N(p, "static") * p.length / p.stack_h,
+              FA_alt_N=opening["fatigue"] if opening else _stem_fatigue_N(p) * p.length / p.stack_h,
+              # F_req comes from the steerer torsion test, a separate test from the bending tests
+              load_with_req=False,
               F_req_N=F_req,
               F_req_basis=f"ステアラ ねじり {T_STEERER_TEST:g} N·m (暫定) × SG {SG_SLIP_STATIC} / (μ {MU_CLAMP} · π · r {r:g} mm) / {n}本")
     return j
@@ -219,14 +275,17 @@ def _rule(name, ok, value, limit, basis, **kw):
     return {"check": name, "pass": bool(ok), "value": value, "limit": limit, "basis": basis, **kw}
 
 
-def stem_joints(p, bar=None, bolt=None, fea=True, faceplate=None):
+def stem_joints(p, bar=None, bolt=None, fea=True, faceplate=None, body=None):
     """Steerer pinch and faceplate joints of a stem, and the bar under the faceplate.
-    fea: the faceplate's clamp compliance from FEA (otherwise the VDI cone alone, which
-    overstates the preload lost to embedding)."""
-    pj = pinch_joint(p, bolt)
+    fea: the faceplate's clamp compliance and the pinch bolts' slot-opening load from FEA
+    (otherwise the VDI cone alone, which overstates the preload lost to embedding, and the
+    upper bound of the slot-opening load)."""
+    op = pinch_opening_load(p, body) if fea else None
+    pj = pinch_joint(p, bolt, opening=op)
     cf = faceplate_clamp_compliance(p, faceplate) if fea else None
     fj, need = faceplate_joint(p, bar, bolt, fea_compliance=cf)
     pr, fr = calc(pj), calc(fj)
+    pr["slot_opening"] = op or {"model": "上限 (曲げモーメント / 締結高さ を 1 本で受ける)"}
     # what the friction holds at the minimum residual clamp force
     r_s, r_b = p.steerer_d / 2, p.bar_d / 2
     pr["capacity"] = {"steerer_torque_Nm": round(MU_CLAMP * math.pi * pj.n * pr["preload"]["F_residual_min"] * r_s / 1000, 1),
