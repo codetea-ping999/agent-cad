@@ -25,6 +25,12 @@ def test_richardson_equal_changes_are_diverging():
     assert r["status"] == "diverging" and r["f_extrap"] is None
 
 
+def test_richardson_unequal_ratios_recovers_second_order():
+    h = [4, 2.8, 2.5]
+    r = richardson(h, [10 + 0.5 * x ** 2 for x in h])
+    assert r["status"] == "converging" and abs(r["p"] - 2) < 1e-3 and abs(r["f_extrap"] - 10) < 1e-3
+
+
 def test_handlebar_checks_the_governing_stress():
     """handlebar_verify accepts on max(vm_p999, vm_p999_away): the study checks that value."""
     lv = [dict(h=h, results={"c": dict(max_disp_mm=1.0, vm_p999_MPa=a, vm_p999_away_MPa=b)},

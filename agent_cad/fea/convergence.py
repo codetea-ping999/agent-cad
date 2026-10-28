@@ -15,6 +15,7 @@ A result that changes by less than SMALL_CHANGE on the finest step is taken as c
 (its order cannot be resolved from changes that small).
 """
 import math
+from scipy.optimize import brentq
 import numpy as np
 
 SMALL_CHANGE = 0.01          # a change below 1 % on the finest step counts as converged
@@ -58,6 +59,24 @@ def mesh_quality(mesh):
             "aspect_max": round(float(ar.max()), 2), "aspect_p99": round(float(np.percentile(ar, 99)), 2)}
 
 
+def _order(r21, r32, e21, e32, p_max=20.0):
+    """Observed order from Celik eq. (3)-(4), p = |ln|e32/e21| + q(p)| / ln r21, solved as a
+    bracketed root (a plain fixed-point iteration diverges for unequal ratios). None when no
+    order in (0, p_max] satisfies it."""
+    s = 1.0 if e32 / e21 > 0 else -1.0
+    ln = math.log(abs(e32 / e21))
+
+    def g(p):
+        return p - abs(ln + math.log((r21 ** p - s) / (r32 ** p - s))) / math.log(r21)
+    if abs(r21 - r32) < 1e-9:
+        return abs(ln) / math.log(r21)
+    grid = [p_max * k / 400 for k in range(1, 401)]
+    for a, b in zip(grid, grid[1:]):
+        if g(a) * g(b) <= 0:
+            return brentq(g, a, b, xtol=1e-12)
+    return None
+
+
 def richardson(h, f, Fs=1.25):
     """Observed order, extrapolated value and GCI of the finest of the last three meshes
     (h: representative element sizes, coarse to fine; f: the result on each)."""
@@ -79,14 +98,9 @@ def richardson(h, f, Fs=1.25):
         # the change does not shrink: no asymptotic range (singular peak, or too coarse)
         p0 = abs(math.log(abs(e32 / e21))) / math.log(r21)
         return {**out, "status": "diverging", "p": round(p0, 2), "f_extrap": None, "gci_fine_pct": None}
-    s = 1.0 if e32 / e21 > 0 else -1.0
-    p = abs(math.log(abs(e32 / e21))) / math.log(r21)
-    for _ in range(100):                           # Celik eq. (3)-(4): fixed point for unequal ratios
-        q = math.log((r21 ** p - s) / (r32 ** p - s))
-        p_new = abs(math.log(abs(e32 / e21)) + q) / math.log(r21)
-        if abs(p_new - p) < 1e-10:
-            break
-        p = p_new
+    p = _order(r21, r32, e21, e32)
+    if p is None:
+        return {**out, "status": "diverging", "p": None, "f_extrap": None, "gci_fine_pct": None}
     f_ext = (r21 ** p * f1 - f2) / (r21 ** p - 1)
     gci = Fs * abs(e21 / f1) / (r21 ** p - 1) * 100
     return {**out, "status": "converging", "p": round(p, 2), "f_extrap": round(f_ext, 4),
