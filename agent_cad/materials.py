@@ -27,4 +27,6 @@ MATERIALS = {
     "A7075-T6": Material(71_700, 0.33, 503, 572, 159, 2.81, 25.2e-6),
     "A2014-T6": Material(72_400, 0.33, 414, 483, 124, 2.80, 24.7e-6),
     "Ti-6Al-4V": Material(113_800, 0.342, 880, 950, 510, 4.43, 9.7e-6),
+    # die-casting alloy, as cast (JIS H 5302 ADC12 typical; fatigue at 5e8 cycles)
+    "ADC12": Material(71_000, 0.33, 150, 310, 138, 2.70, 21.0e-6),
 }
