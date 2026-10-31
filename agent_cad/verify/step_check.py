@@ -19,6 +19,8 @@ Checks run on a written STEP file, against the in-memory reference parts:
 import re, math, json, tempfile, os
 from collections import Counter
 import numpy as np
+from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
 from OCP.BRepCheck import BRepCheck_Analyzer
 from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds, ShapeAnalysis_ShapeTolerance
 from OCP.TopAbs import TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE, TopAbs_ON
@@ -185,10 +187,23 @@ def _off_surface(a, b, n=100, tol=1e-3):
         return None
     pts = v[::max(1, len(v) // n)]
     c = BRepClass3d_SolidClassifier(b.wrapped)      # built once, queried per point
+    shell = None
     off = 0
     for p in pts:
-        c.Perform(gp_Pnt(p.X, p.Y, p.Z), tol)
-        off += c.State() != TopAbs_ON
+        q = gp_Pnt(p.X, p.Y, p.Z)
+        c.Perform(q, tol)
+        if c.State() == TopAbs_ON:
+            continue
+        # the classifier can call a point on a tangent seam IN or OUT: settle it by
+        # the distance to b's faces, which a real misplacement does not pass
+        if shell is None:
+            from OCP.TopoDS import TopoDS_Compound
+            from OCP.BRep import BRep_Builder
+            shell = TopoDS_Compound(); bb = BRep_Builder(); bb.MakeCompound(shell)
+            for f in _iter(b.wrapped, TopAbs_FACE):
+                bb.Add(shell, f)
+        ds = BRepExtrema_DistShapeShape(BRepBuilderAPI_MakeVertex(q).Vertex(), shell)
+        off += not (ds.IsDone() and ds.Value() <= tol)
     return off
 
 
