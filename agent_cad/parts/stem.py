@@ -3,6 +3,11 @@ import math, json, sys
 from dataclasses import dataclass, asdict, field
 from build123d import *
 
+# Revision of the geometry this module builds. It is part of the drawing/STEP document
+# number, so bump it whenever build() returns a different shape for the same parameters
+# (tests/test_drawing.py pins the default model's fingerprint to this revision).
+GEOMETRY_REV = 1
+
 MATERIALS = {  # density g/cm3
     "A6061-T6": 2.70, "A7075-T6": 2.81, "A2014-T6": 2.80, "Ti-6Al-4V": 4.43,
 }
@@ -107,6 +112,13 @@ def outer(p: StemParams):
             part -= extrude(Plane(origin=o, x_dir=Y, z_dir=d) * RectangleRounded(nw, H, 3), p.boss_back + p.fp_front + 2)
     return part
 
+def _window_profile(p):
+    """Full-round slot fp_window_w (across, Y) x fp_window_h (vertical); end radius = half the smaller size."""
+    w, h = p.fp_window_w, p.fp_window_h
+    if abs(w - h) < 1e-9:
+        return Circle(w / 2)
+    return SlotOverall(max(w, h), min(w, h), rotation=0 if w > h else 90)
+
 def build(p: StemParams):
     d, n, S, B = frame(p)
     Y = Vector(0, 1, 0)
@@ -127,8 +139,8 @@ def build(p: StemParams):
         part -= side * Cylinder(p.cbore_d / 2, 2 * p.cbore_depth)                      # counterbore
         part -= Plane(origin=(bx, p.slot_w / 2 - 0.01, z), z_dir=(0, 1, 0)) * Cylinder(
             p.bolt_clear_d / 2, p.ear_half_w, align=(Align.CENTER, Align.CENTER, Align.MIN))  # clearance
-        part -= Plane(origin=(bx, 0.01, z), z_dir=(0, -1, 0)) * Cylinder(
-            p.tap_drill_d / 2, p.ear_half_w, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        part -= Plane(origin=(bx, 0.01, z), z_dir=(0, -1, 0)) * Cylinder(   # through the -Y ear
+            p.tap_drill_d / 2, p.ear_half_w + 1, align=(Align.CENTER, Align.CENTER, Align.MIN))
     # --- split faceplate
     big = 400
     front = bar_pl * Pos(big / 2 + p.fp_gap / 2, 0, 0) * Box(big, big, big)
@@ -140,16 +152,19 @@ def build(p: StemParams):
             loc = Vector(0, sv * p.fp_bolt_off, sw * p.fp_bolt_w)
             # faceplate: clearance + counterbore from front face
             fpl = Plane(origin=bar_pl.from_local_coords((p.fp_front + 0.01, loc.Y, loc.Z)), z_dir=-d)
-            faceplate -= fpl * Cylinder(p.cbore_d / 2, 2 * 2.5)
+            # counterbore 2.5 deep; the cutter is long so it also clears the clamp ring
+            # standing proud of the boss face in its path, as the real tool would
+            faceplate -= Plane(origin=fpl.origin - d * 2.51, z_dir=d) * Cylinder(
+                p.cbore_d / 2, 40, align=(Align.CENTER, Align.CENTER, Align.MIN))
             faceplate -= fpl * Cylinder(p.bolt_clear_d / 2, 40, align=(Align.CENTER, Align.CENTER, Align.MIN))
-            # body: tap drill
+            # body: tap drill, tap_depth deep from the mating face (the cutter starts in the gap)
             bpl = Plane(origin=bar_pl.from_local_coords((0, loc.Y, loc.Z)), z_dir=-d)
-            body_part -= bpl * Cylinder(p.tap_drill_d / 2, p.tap_depth, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            body_part -= bpl * Cylinder(p.tap_drill_d / 2, p.tap_depth + p.fp_gap / 2,
+                                        align=(Align.CENTER, Align.CENTER, Align.MIN))
     if p.fp_window_w > 0 and p.fp_window_h > 0:
         # centre window through the faceplate, machined from the front
         win = Plane(origin=B, x_dir=Vector(0, 1, 0), z_dir=d)
-        r = min(p.fp_window_w, p.fp_window_h) / 2 - 0.01
-        faceplate -= extrude(win * RectangleRounded(p.fp_window_w, p.fp_window_h, r), 60)
+        faceplate -= extrude(win * _window_profile(p), 60)
     return body_part, faceplate
 
 def cfd_solid(p: StemParams, bar_len=160.0, steer_below=30.0, steer_above=3.0, head_h=5.0):
@@ -161,8 +176,7 @@ def cfd_solid(p: StemParams, bar_len=160.0, steer_below=30.0, steer_above=3.0, h
     part = outer(p)
     if p.fp_window_w > 0 and p.fp_window_h > 0:
         win = Plane(origin=B, x_dir=Y, z_dir=d)
-        r = min(p.fp_window_w, p.fp_window_h) / 2 - 0.01
-        part -= extrude(win * RectangleRounded(p.fp_window_w, p.fp_window_h, r), 60)
+        part -= extrude(win * _window_profile(p), 60)
     protr = head_h - 2.5   # faceplate counterbore depth is 2.5
     if protr > 0:
         for sv in (-1, 1):
@@ -211,7 +225,8 @@ def checks(p, body_part, faceplate):
         "body_side_around_lightening": round((min(p.body_w, we) - p.light_d) / 2, 2),
         "body_top_around_lightening": round((min(p.body_h, he) - p.light_d) / 2, 2),
     }
-    res["thread_engagement_mm"] = {"pinch": round(p.ear_half_w - p.slot_w / 2, 2), "faceplate": p.tap_depth}
+    res["thread_engagement_mm"] = thread_depths(p)      # the usable depths the drawing calls out
+    res["tap_drill_fits_M5"] = m5_drill_excess(p.tap_drill_d) == 0
     mass = (body_part.volume + faceplate.volume) / 1000 * rho
     res["mass_g"] = {"body": round(body_part.volume / 1000 * rho, 1), "faceplate": round(faceplate.volume / 1000 * rho, 1), "total_excl_bolts": round(mass, 1)}
     MIN_WALL = 1.5
@@ -219,8 +234,36 @@ def checks(p, body_part, faceplate):
                        and all(v == 0 for v in res["interference_mm3"].values())
                        and min(res["min_wall_mm"].values()) >= MIN_WALL
                        and min(res["thread_engagement_mm"].values()) >= 1.5 * 5
+                       and res["tap_drill_fits_M5"]
                        and mass <= p.mass_target_g)
     return res
+
+# the drawings call out M5x0.8 threads: the tap drill must lie in the M5 internal minor
+# diameter band (JIS B 0209-2, 6H: D1 4.134..4.334 mm)
+M5_DRILL = (4.134, 4.334)
+
+
+def m5_drill_excess(d):
+    """How far drill diameter d lies outside the M5 minor-diameter band (0 inside)."""
+    return max(0.0, M5_DRILL[0] - d, d - M5_DRILL[1])
+
+
+TAP_RUNOUT = 2.0       # blind tapped hole: incomplete thread at the drill bottom (plug tap)
+TAP_LEAD_IN = 1.0      # through tapped hole: entry chamfer and first incomplete turn
+
+
+def usable_thread(length, through):
+    """Full-thread depth of a tapped hole whose drill is `length` long, rounded down to
+    0.5 mm: the value a drawing calls out and the engagement rule must use."""
+    return math.floor((length - (TAP_LEAD_IN if through else TAP_RUNOUT)) * 2 + 1e-6) / 2
+
+
+def thread_depths(p):
+    """Usable M5 thread in the body: pinch ears (tapped through the -Y ear) and
+    faceplate bolts (blind, tap_depth = drill depth)."""
+    return {"pinch": usable_thread(p.ear_half_w - p.slot_w / 2, through=True),
+            "faceplate": usable_thread(p.tap_depth, through=False)}
+
 
 if __name__ == "__main__":
     import argparse
