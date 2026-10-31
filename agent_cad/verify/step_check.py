@@ -182,7 +182,10 @@ def _off_surface(a, b, n=100, tol=1e-3):
     """How many of ~n points sampled on a's faces (mesh nodes lie on the exact
     surface) are not on b's boundary: catches placements that symmetric parts
     hide from mass properties and bounds."""
-    v, _ = a.tessellate(0.05, 0.2)
+    try:
+        v, _ = a.tessellate(0.05, 0.2)
+    except AttributeError:          # a face OCCT cannot mesh (degenerate): every sample counts as off
+        return n
     if not v:
         return None
     pts = v[::max(1, len(v) // n)]
@@ -208,7 +211,10 @@ def _off_surface(a, b, n=100, tol=1e-3):
 
 
 def _mesh_volume(shape, tol=0.02):
-    v, t = shape.tessellate(tol, 0.1)
+    try:
+        v, t = shape.tessellate(tol, 0.1)
+    except AttributeError:          # a face OCCT cannot mesh: no mesh volume, the check fails
+        return None
     if not v or not t:
         return None
     V = np.array([(p.X, p.Y, p.Z) for p in v]); T = np.array(t)
