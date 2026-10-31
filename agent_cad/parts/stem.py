@@ -222,14 +222,6 @@ def checks(p, body_part, faceplate):
                        and mass <= p.mass_target_g)
     return res
 
-def write_step_ap242(shape, path):
-    from OCP.STEPControl import STEPControl_Writer, STEPControl_AsIs
-    from OCP.Interface import Interface_Static
-    Interface_Static.SetIVal_s("write.step.schema", 5)
-    w = STEPControl_Writer(); w.Model(True)
-    w.Transfer(shape.wrapped, STEPControl_AsIs)
-    assert int(w.Write(path)) == 1
-
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
@@ -242,9 +234,13 @@ if __name__ == "__main__":
     r = checks(p, body_part, faceplate)
     import os
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-    write_step_ap242(body_part, out + "_body.step")
-    write_step_ap242(faceplate, out + "_faceplate.step")
-    write_step_ap242(Compound([body_part, faceplate]), out + "_assembly.step")
+    from agent_cad.step_io import write_step, PartSpec
+    rho = density(p)
+    bp = PartSpec("STEM_BODY", body_part, (0.604, 0.643, 0.694), p.material, rho)
+    fp = PartSpec("STEM_FACEPLATE", faceplate, (0.788, 0.541, 0.239), p.material, rho)
+    write_step([bp], out + "_body.step")
+    write_step([fp], out + "_faceplate.step")
+    write_step([bp, fp], out + "_assembly.step", "STEM")
     rep = {"params": asdict(p), "density_g_cm3": density(p), "checks": r}
     json.dump(rep, open(out + "_report.json", "w"), ensure_ascii=False, indent=1)
     if not r["pass"]:
