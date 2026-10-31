@@ -25,6 +25,7 @@ MIN_WALL_MM = 2.0          # ADC12 small castings (JIS H 5302 commentary / NADCA
 COOL_TO_CAVITY = 1.5       # x channel diameter
 COOL_TO_PIN_MM = 4.0
 COOL_TO_SLEEVE = 1.5       # x channel diameter: the sleeve holds molten metal
+COOL_TO_BACK = 1.0         # x channel diameter: steel behind the channel
 
 
 def machined_faces(finished, casting, tol=1e-3):
@@ -90,8 +91,10 @@ def verify_diecast(p=bracket.BracketParams(), dp=dc.DiecastParams(), ds=None):
         disc = Pos(x * k, y * k, z * k) * Cylinder(rp, 0.2, rotation=(90, 0, 0), align=(Align.CENTER, Align.CENTER, Align.MIN))
         seat.append(round((disc & cav).volume / disc.volume, 4))
         cut += (pin & cav).volume + (pin & mv).volume
-    on_part = sum(1 for x, z, y in ds["pin_sites"] if y == p.plate_t)
-    rules.append(_rule("ejector.pins_seated", min(seat) > 0.999, min(seat), 1.0,
+    # a pin is on the casting when the casting itself is under its face (overflow wells can
+    # have the plate's height)
+    on_part = sum(1 for x, z, y in ds["pin_sites"] if cast.is_inside(Vector(x, y - 0.05, z)))
+    rules.append(_rule("ejector.pins_seated", min(seat, default=0.0) > 0.999, min(seat, default=0.0), 1.0,
                        "fraction of each pin face backed by the shot", per_pin=seat))
     rules.append(_rule("ejector.pins_clear", cut < 1e-2, round(cut, 4), 0.0, "mm3 of pin inside the cavity or the die"))
     rules.append(_rule("ejector.pins_on_part", on_part >= 4, on_part, 4,
@@ -110,12 +113,19 @@ def verify_diecast(p=bracket.BracketParams(), dp=dc.DiecastParams(), ds=None):
     dsl = _min_dist(chc, [sleeve])
     rules.append(_rule("cooling.to_sleeve", dsl >= COOL_TO_SLEEVE * dp.cool_d_mm - 1e-3, round(dsl, 2),
                        COOL_TO_SLEEVE * dp.cool_d_mm, "mm, channel wall to shot sleeve bore (>= 1.5 d)"))
+    # steel left between each channel and the back face of its block (else it breaks through)
+    rc = dp.cool_d_mm / 2
+    hb = ds["block_mm"][1]
+    back = min([hb - (c.center().Y + rc) for c in chm] + [dp.cover_t_mm + (c.center().Y - rc) for c in chc],
+               default=float("inf"))
+    rules.append(_rule("cooling.enclosed", back >= COOL_TO_BACK * dp.cool_d_mm - 1e-3, round(back, 2),
+                       COOL_TO_BACK * dp.cool_d_mm, "mm, channel wall to the back face of its die block (>= 1 d)"))
     rules.append(_rule("cooling.present", len(chm) >= 3 and len(chc) >= 3, [len(chm), len(chc)], [3, 3],
                        "channels in the moving / cover die"))
 
     # process estimates
     proj = section2d(shot, 1e-3).union(section2d(shot, -1e-3))
-    area = proj.area
+    area = proj.area * k ** 2                                   # the hot cavity, not the cold shot
     f_open = dp.pressure_MPa * area / 1000                     # kN
     f_clamp = dp.clamp_margin * f_open
     t_clamp = f_clamp / 9.81
@@ -127,6 +137,8 @@ def verify_diecast(p=bracket.BracketParams(), dp=dc.DiecastParams(), ds=None):
     rules.append(_rule("process.machine", machine is not None, machine, dc.MACHINES_T[-1],
                        "smallest standard machine (tf) with clamp force >= margin x opening force"))
     m_fin, m_cast, m_shot = (s.volume / 1000 * rho for s in (fin, cast, shot))
+    rules.append(_rule("part.mass_g", m_fin <= p.mass_target_g, round(m_fin, 1), p.mass_target_g,
+                       "finished part mass, parameter mass_target_g"))
     return {
         "rules": rules, "pass": all(r["pass"] for r in rules), "failed": [r["check"] for r in rules if not r["pass"]],
         "process": {

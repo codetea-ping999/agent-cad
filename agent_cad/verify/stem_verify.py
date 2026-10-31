@@ -63,6 +63,10 @@ def body_fea(p, body, cases=LOAD_CASES, h=2.0):
 
 
 def verify(p: stem.StemParams, fea=True, h=2.0, cases=LOAD_CASES):
+    cases = tuple(cases)                        # iterated twice: the solves, then the rules
+    names = [lc.name for lc in cases]
+    if len(set(names)) != len(names):           # results are keyed by name
+        raise ValueError(f"duplicate load case names: {names}")
     b, f = stem.build(p)
     g = stem.checks(p, b, f)
     mat = MATERIALS[p.material]
@@ -79,6 +83,8 @@ def verify(p: stem.StemParams, fea=True, h=2.0, cases=LOAD_CASES):
     for k, v in g["thread_engagement_mm"].items():
         rules.append(_rule(f"thread.{k}", v >= THREAD_ENGAGEMENT_D * BOLT_D, v, THREAD_ENGAGEMENT_D * BOLT_D,
                            f"M{BOLT_D:g} in aluminium: engagement >= {THREAD_ENGAGEMENT_D} d"))
+    rules.append(_rule("thread.tap_drill_M5", g["tap_drill_fits_M5"], p.tap_drill_d, list(stem.M5_DRILL),
+                       "tap drill within the M5 minor-diameter band"))
     m = g["mass_g"]["total_excl_bolts"]
     rules.append(_rule("mass.total_g", m <= p.mass_target_g, m, p.mass_target_g, "parameter mass_target_g"))
     fea_out = {}

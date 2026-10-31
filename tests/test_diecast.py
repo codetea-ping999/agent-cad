@@ -1,6 +1,6 @@
 import math
 import pytest
-from build123d import Vector
+from build123d import Vector, Pos
 from agent_cad.parts import bracket
 from agent_cad.process import diecast as dc
 from agent_cad.verify.diecast_check import verify_diecast, machined_faces
@@ -99,3 +99,49 @@ def test_document_number_follows_the_geometry_revision(made, monkeypatch):
     before = doc_no(P)
     monkeypatch.setattr(bracket, "GEOMETRY_REV", bracket.GEOMETRY_REV + 1)
     assert doc_no(P) != before
+
+
+def test_gate_keeps_the_width_it_is_sized_for():
+    """A fast gate narrower than the runner: the fan converges onto it, it is not widened."""
+    from build123d import Box
+    dp = dc.DiecastParams(gate_v_m_s=60.0)
+    g = dc.gating_sizes(P, dp, 57_000)
+    assert g["gate_w_mm"] < g["runner_w_mm"]
+    runner, _, _ = dc.gating(P, dp, 57_000)
+    z = -P.plate_w / 2 - dp.gate_land_mm / 2                   # on the gate land
+    cut = runner & Pos(0, 0.05, z) * Box(200, 0.1, 0.1)
+    assert abs(cut.bounding_box().size.X - g["gate_w_mm"]) < 0.05
+
+
+def test_mass_target_channel_cover_and_pins_on_the_casting_are_checked():
+    p = bracket.BracketParams(mass_target_g=100.0, hub_d=50.0)
+    dp = dc.DiecastParams(cover_t_mm=20.0, overflow_mm=(12.0, 10.0, 4.0))
+    ds = dc.die_set(p, dp)
+    rep = verify_diecast(p, dp, ds=ds)
+    r = {x["check"]: x for x in rep["rules"]}
+    assert {"part.mass_g", "cooling.enclosed"} <= set(rep["failed"])
+    assert r["cooling.enclosed"]["value"] < 0                  # the channels break through the back
+    # the overflow wells are as high as the plate, but only plate pins count as on the casting
+    plate = [s for s in ds["pin_sites"] if ds["casting"].is_inside(Vector(s[0], s[2] - 0.05, s[1]))]
+    assert r["ejector.pins_on_part"]["value"] == len(plate) < len([s for s in ds["pin_sites"] if s[2] == p.plate_t])
+
+
+def test_tooling_is_numbered_by_the_process_and_assembled_hot(made):
+    from scripts.make_diecast import doc_no, tool_no, specs
+    ds, _ = made
+    hot = dc.DiecastParams(shrink_pct=0.7)
+    assert tool_no(P, hot) != tool_no(P, DP) and tool_no(P, DP).startswith(doc_no(P))
+    s = specs(P, DP, ds)
+    assert s["moving"].name.startswith(tool_no(P, DP)) and s["casting"].name.startswith(doc_no(P) + "-C1")
+    # the shot in the die assembly is the cavity it fills, not the cold shot
+    assert abs(s["shot_hot"].shape.volume - ds["cavity"].volume) < 1e-3 * ds["cavity"].volume
+
+
+def test_no_seat_for_any_pin_is_a_failed_rule_and_clamp_uses_the_cavity(made):
+    ds, rep = made
+    bare = dict(ds, pins=[], pin_sites=[])
+    r = {x["check"]: x for x in verify_diecast(P, DP, ds=bare)["rules"]}
+    assert not r["ejector.pins_seated"]["pass"] and not r["ejector.pins_on_part"]["pass"]
+    from agent_cad.process.forging import section2d
+    cav = section2d(ds["cavity"], 1e-3).union(section2d(ds["cavity"], -1e-3)).area
+    assert abs(rep["process"]["projected_area_mm2"] - cav) < 0.005 * cav
