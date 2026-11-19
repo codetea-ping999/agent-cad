@@ -28,16 +28,26 @@ def doc_no(p):
     return f"AC-BRKT-{h}"
 
 
-def specs(p, ds):
-    """Products named after the part's drawing number (C = casting, D = die)."""
-    dn, rho = doc_no(p), bracket.density(p)
+def tool_no(p, dp):
+    """The part's number plus a key unique to the process parameters: the gating and the
+    die change with them while the part stays the same."""
+    h = hashlib.sha1(json.dumps(dc.asdict(dp), sort_keys=True, default=str).encode()).hexdigest()[:6].upper()
+    return f"{doc_no(p)}-T{h}"
+
+
+def specs(p, dp, ds):
+    """Products named after the part's drawing number (C1 = casting) and, for everything
+    that depends on the process parameters, the tooling number (C2 = shot, D = die)."""
+    dn, tn, rho = doc_no(p), tool_no(p, dp), bracket.density(p)
     steel, srho = dc.DIE_STEEL
     s = {"finished": PartSpec(f"{dn}_BRACKET", ds["finished"], CAST_RGB, p.material, rho),
          "casting": PartSpec(f"{dn}-C1_CASTING", ds["casting"], CAST_RGB, p.material, rho),
-         "shot": PartSpec(f"{dn}-C2_SHOT_WITH_GATING", ds["shot"], CAST_RGB, p.material, rho),
-         "moving": PartSpec(f"{dn}-D1_DIE_MOVING", ds["moving"], DIE_RGB, steel, srho),
-         "cover": PartSpec(f"{dn}-D2_DIE_COVER", ds["cover"], DIE_RGB, steel, srho)}
-    s["pins"] = [PartSpec(f"{dn}-D3_EJECTOR_PIN_{i + 1}", pin, PIN_RGB, steel, srho) for i, pin in enumerate(ds["pins"])]
+         "shot": PartSpec(f"{tn}-C2_SHOT_WITH_GATING", ds["shot"], CAST_RGB, p.material, rho),
+         # in the die the shot is still hot: as large as the cavity it fills
+         "shot_hot": PartSpec(f"{tn}-C3_SHOT_IN_DIE", scale(ds["shot"], dc.shrink_factor(dp)), CAST_RGB, p.material, rho),
+         "moving": PartSpec(f"{tn}-D1_DIE_MOVING", ds["moving"], DIE_RGB, steel, srho),
+         "cover": PartSpec(f"{tn}-D2_DIE_COVER", ds["cover"], DIE_RGB, steel, srho)}
+    s["pins"] = [PartSpec(f"{tn}-D3_EJECTOR_PIN_{i + 1}", pin, PIN_RGB, steel, srho) for i, pin in enumerate(ds["pins"])]
     return s
 
 
@@ -45,13 +55,13 @@ def make(name, p, dp=dc.DiecastParams(), out="out", do_render=True):
     os.makedirs(out, exist_ok=True)
     ds = dc.die_set(p, dp)
     rep = verify_diecast(p, dp, ds=ds)
-    s = specs(p, ds)
+    s = specs(p, dp, ds)
     files = {f"{out}/{name}.step": ([s["finished"]], None),
              f"{out}/{name}_casting.step": ([s["casting"]], None),
              f"{out}/{name}_shot.step": ([s["shot"]], None),
              f"{out}/{name}_die_moving.step": ([s["moving"]], None),
              f"{out}/{name}_die_cover.step": ([s["cover"]], None),
-             f"{out}/{name}_die_assembly.step": ([s["moving"], s["cover"], *s["pins"], s["shot"]],
+             f"{out}/{name}_die_assembly.step": ([s["moving"], s["cover"], *s["pins"], s["shot_hot"]],
                                                  f"{name.upper()}_DIECAST_DIE_SET")}
     xchk = []
     for path, (parts, an) in files.items():
