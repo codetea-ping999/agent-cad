@@ -31,6 +31,16 @@ MATERIAL_SPEC = {  # material -> (drawing designation, colour / finish)
 TRIES = [(A3, 1.0), (A2, 1.0), (A3, 0.5), (A2, 0.5)]
 
 
+def _draft_note(p) -> str:
+    """Default-draft note. Ribs and bosses/holes share one figure when their drafts match
+    (keeps the released wording); otherwise each gets its own, as the model builds them."""
+    if math.isclose(p.rib_draft_deg, p.boss_draft_deg):
+        inner = f"リブ・ボス・穴 {_fmt(p.rib_draft_deg)}° (片側)"
+    else:
+        inner = f"リブ {_fmt(p.rib_draft_deg)}° (片側)、ボス・穴 {_fmt(p.boss_draft_deg)}° (片側)"
+    return f"指示なき抜き勾配: 外面・内面 {_fmt(p.draft_deg)}°、{inner}、窓 {_fmt(p.window_draft_deg)}°。"
+
+
 def _fmt(x):
     return f"{x:.2f}".rstrip("0").rstrip(".")
 
@@ -212,7 +222,7 @@ def _sheet(p, part, dwg_no, size, k):
     sh.meta["part"] = "HOUSING"
     _notes(sh, [f"材料 {p.material}、色 {finish.split('、')[0] or '未指定'}。材質表示 {rs.iso_mark} (JIS K 6899-1) を内面に浮き出し。",
                 f"指示なき寸法許容差は JIS B 0405-{TOL_CLASS} による (樹脂の公差は JIS K 7109 を参考に成形者と協議)。",
-                f"指示なき抜き勾配: 外面・内面 {_fmt(p.draft_deg)}°、リブ・ボス・穴 {_fmt(p.rib_draft_deg)}° (片側)、窓 {_fmt(p.window_draft_deg)}°。",
+                _draft_note(p),
                 "寸法は勾配の始まる側 (開口端・ボス先端・窓は外面) で示す。",
                 "PL: 開口端面。PL段差・バリ 0.1 以下。ゲート: +X 側面下端 (エッジゲート)、残り 0.3 以下。",
                 "突出しピン跡は内面のみ、凹凸 0.1 以下。外観面にヒケ・ウエルドラインなきこと。",
