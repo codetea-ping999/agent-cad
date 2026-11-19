@@ -241,8 +241,9 @@ def bar_torque_demand(p, bar=None):
     """Bar torques and pulls at the stem from the handlebar's load cases: the provisional
     torsion test torque, the peak torque of the in-phase fatigue cases (both hands push
     down ahead of or behind the clamp), the peak torque of the static cases (hoods and
-    drops), and the forward pull of the static cases (taken by the faceplate bolts).
-    Each case acts at its own load point."""
+    drops), and the pull of each case on the faceplate bolts: the load's component along
+    the stem axis (the bolt axis), which for an angled stem includes part of a vertical
+    load. Each case acts at its own load point."""
     out = {"test_Nm": T_BAR_TEST, "fatigue_peak_Nm": 0.0, "forward_pull_N": 0.0, "fatigue_pull_N": 0.0}
     if bar is None:
         return out
@@ -255,16 +256,19 @@ def bar_torque_demand(p, bar=None):
     for where, (nm, s) in hv.load_points(bar, sol).items():
         pts[where] = np.array(segs[nm].point(s)[0]) + (np.array(hv.HOOD_OFFSET) if where == "hoods" else 0.0)
     out["static_peak_Nm"] = 0.0
+    a = math.radians(p.angle_deg)
+    axis = np.array([math.cos(a), 0.0, math.sin(a)])         # stem.frame(p) d: faceplate bolt axis
     for lc in hv.LOAD_CASES:
         q = pts[lc.where]
         F = np.array(lc.force_N)
         My = q[2] * F[0] - q[0] * F[2]                        # about the bar axis (Y), one side
         both = 2 if lc.phase > 0 else 0                        # out of phase: the two sides cancel
+        pull = float(max(F @ axis, 0.0))                       # pushes the bar toward the faceplate
         if lc.kind == "fatigue":
             out["fatigue_peak_Nm"] = max(out["fatigue_peak_Nm"], float(abs(My)) * both / 1000)
-            out["fatigue_pull_N"] = max(out["fatigue_pull_N"], float(max(F[0], 0.0)) * 2)
+            out["fatigue_pull_N"] = max(out["fatigue_pull_N"], pull * 2)
         else:
-            out["forward_pull_N"] = max(out["forward_pull_N"], float(max(F[0], 0.0)) * 2)
+            out["forward_pull_N"] = max(out["forward_pull_N"], pull * 2)
             out["static_peak_Nm"] = max(out["static_peak_Nm"], float(abs(My)) * both / 1000)
     out["hood_point_mm"] = [round(float(c), 1) for c in pts["hoods"]]
     out["drop_point_mm"] = [round(float(c), 1) for c in pts["drops"]]

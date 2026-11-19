@@ -146,3 +146,11 @@ def test_bracket_and_housing():
     assert fc.housing_screws(HousingParams())["pass"]
     # a hole too wide for the screw fails the guide
     assert not fc.housing_screws(dataclasses.replace(HousingParams(), hole_d=3.8))["pass"]
+
+
+def test_angled_stem_takes_part_of_a_vertical_load_on_the_faceplate_bolts():
+    bar = HandlebarParams()
+    up = fc.bar_torque_demand(stem.StemParams(), bar)               # +6°: a downward load pushes the bar to the steerer
+    assert up["fatigue_pull_N"] == 0.0
+    down = fc.bar_torque_demand(stem.StemParams(length=110, angle_deg=-17), bar)
+    assert down["fatigue_pull_N"] == pytest.approx(2 * 450 * math.sin(math.radians(17)), rel=1e-6)

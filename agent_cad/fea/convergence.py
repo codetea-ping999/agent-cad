@@ -94,8 +94,10 @@ def richardson(h, f, Fs=1.25):
                 "gci_fine_pct": round(Fs * abs(e21 / f1) * 100, 2) if f1 else 0.0}
     if abs(e32) < 1e-12 * max(abs(f2), 1e-30) or e32 * e21 < 0:
         return {**out, "status": "oscillating", "p": None, "f_extrap": None, "gci_fine_pct": None}
-    if abs(e21) > abs(e32) * 0.98:
-        # the change does not shrink: no asymptotic range (singular peak, or too coarse)
+    if abs(e21) > abs(e32) * 0.98 * math.log(r21) / math.log(r32):
+        # the change does not shrink: no asymptotic range (singular peak, or too coarse).
+        # For f = f0 + C h^p, e21/e32 falls from ln r21 / ln r32 (p -> 0) as p grows, so a
+        # raw change above that bound has no positive order (equal ratios: |e21| > |e32|).
         p0 = abs(math.log(abs(e32 / e21))) / math.log(r21)
         return {**out, "status": "diverging", "p": round(p0, 2), "f_extrap": None, "gci_fine_pct": None}
     p = _order(r21, r32, e21, e32)

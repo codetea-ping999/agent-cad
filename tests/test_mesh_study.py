@@ -69,3 +69,9 @@ def test_stem_study_on_coarse_meshes():
     assert d["change_fine_pct"] < 5
     for l in r["levels"]:
         assert l["quality"]["quality_min"] > 0.01
+
+
+def test_richardson_unequal_ratios_growing_raw_change_still_converges():
+    r = richardson([4, 3.5, 2.5], [200 + 0.5 * h ** 2 for h in (4, 3.5, 2.5)])
+    assert r["status"] == "converging"
+    assert abs(r["p"] - 2) < 1e-6 and abs(r["f_extrap"] - 200) < 1e-6
