@@ -1,4 +1,5 @@
 import math
+import shapely.affinity
 import pytest
 from build123d import Box, Pos, Align, Plane, mirror
 from agent_cad.parts import stem
@@ -93,3 +94,21 @@ def test_flash_land_keeps_its_thickness(made):
     assert up.is_inside(Vector(x, t / 2 * k + 0.2, z))             # die face above the land
     gx, gz = outline.buffer(b + 6).exterior.interpolate(0.3, normalized=True).coords[0]
     assert not up.is_inside(Vector(gx * k, tg / 2 * 0.9, gz * k))  # gutter
+
+
+def test_hot_forging_with_its_flash_fits_the_dies(made):
+    """The flash land is cut for the hot flash (k t thick); a land cut to the cold
+    thickness t squeezes the flash and the check must see it."""
+    from build123d import extrude
+    _, ds, rep = made
+    k = rep["process"]["shrink_factor"]
+    r = {x["check"]: x for x in rep["rules"]}
+    assert r["die.upper.clears_forging"]["value"] == 0 and r["die.lower.clears_forging"]["value"] == 0
+    outline, _, t, b, _ = fg.flash_dims(ds["blank"], fg.ForgingParams())
+    ring = outline.buffer(b, quad_segs=8).difference(outline.buffer(1.0))    # the land, off the cavity
+    ring = shapely.affinity.scale(ring, k, k, origin=(0, 0))
+    upper = ds["upper"]
+    for poly in fg._polys(ring):
+        upper += extrude(fg.face_at(poly, t / 2), (k - 1) * t / 2, dir=(0, 1, 0))
+    bad = verify_forging(P, ds=dict(ds, upper=upper))
+    assert "die.upper.clears_forging" in bad["failed"]

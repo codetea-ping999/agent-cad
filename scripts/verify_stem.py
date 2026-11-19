@@ -6,19 +6,19 @@
 
 Exit status 1 when any rule fails, so the command can gate a parameter sweep or CI.
 """
-import argparse, dataclasses, json, sys
+import argparse, dataclasses, json, os, sys, typing
 from agent_cad.parts.stem import StemParams
 from agent_cad.verify.stem_verify import verify
 
 
 def parse_set(p, items):
-    types = {f.name: f.type for f in dataclasses.fields(StemParams)}
+    types = typing.get_type_hints(StemParams)      # the declared type: a preset may hold 110 for 110.0
     kw = {}
     for it in items:
         k, _, v = it.partition("=")
         if k not in types:
             raise SystemExit(f"unknown parameter {k!r}")
-        t = type(getattr(p, k))
+        t = types[k]
         kw[k] = (v.lower() in ("1", "true", "yes")) if t is bool else t(v)
     return dataclasses.replace(p, **kw)
 
@@ -39,6 +39,7 @@ def main(argv=None):
         print(f"{'OK  ' if x['pass'] else 'FAIL'} {x['check']:<40} {x['value']!s:>10} / {x['limit']!s:<8} {x['basis']}{prov}")
     print("PASS" if r["pass"] else f"FAIL: {', '.join(r['failed'])}")
     if a.json:
+        os.makedirs(os.path.dirname(a.json) or ".", exist_ok=True)
         with open(a.json, "w") as fh:
             json.dump(r, fh, indent=1, ensure_ascii=False, default=str)
     return 0 if r["pass"] else 1

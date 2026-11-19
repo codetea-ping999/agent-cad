@@ -119,3 +119,12 @@ def test_document_number_follows_the_geometry_revision(made, monkeypatch):
     before = doc_no(P)
     monkeypatch.setattr(housing, "GEOMETRY_REV", housing.GEOMETRY_REV + 1)
     assert doc_no(P) != before
+
+
+def test_draft_note_names_the_boss_draft_when_it_differs_from_the_rib_draft():
+    from dataclasses import replace
+    from agent_cad.parts.housing_drawing import _draft_note
+    same = _draft_note(P)
+    assert "リブ・ボス・穴 0.5°" in same
+    note = _draft_note(replace(P, rib_draft_deg=0.5, boss_draft_deg=1.0))
+    assert "リブ 0.5° (片側)" in note and "ボス・穴 1° (片側)" in note

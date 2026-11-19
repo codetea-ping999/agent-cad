@@ -122,12 +122,12 @@ def verify_forging(p: stem.StemParams, fp: fg.ForgingParams = fg.ForgingParams()
     rules.append(_rule("forging.undercut", not under, len(under), 0, "points from which the die cannot withdraw",
                        at_mm=under[:5]))
     k = fg.shrink_factor(p, fp)
-    hot = scale(blank, k)
+    hot = scale(forging, k)                     # as it leaves the die: flash included
     for name, die in (("upper", up), ("lower", lo)):
         ok = die.is_valid and len(die.solids()) == 1
         rules.append(_rule(f"die.{name}.valid", ok, ok, True, "one valid solid"))
         ov = (die & hot).volume
-        rules.append(_rule(f"die.{name}.clears_forging", ov < 1e-2, round(ov, 4), 0.0, "mm3 overlap with the hot forging"))
+        rules.append(_rule(f"die.{name}.clears_forging", ov < 1e-2, round(ov, 4), 0.0, "mm3 overlap with the hot forging and its flash"))
     ov = (up & lo).volume
     rules.append(_rule("die.halves_clear", ov < 1e-2, round(ov, 4), 0.0, "mm3 overlap between upper and lower die"))
     outline, area, t, land_w, tg = fg.flash_dims(blank, fp)
