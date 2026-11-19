@@ -117,7 +117,7 @@ def test_faceplate_needs_about_5_Nm():
     faceplate bolts at >= ~4.9 N.m with the FEA clamp compliance."""
     p = stem.StemParams()
     c = fc.faceplate_clamp_compliance(p, h=2.0)
-    assert 4e-6 < c < 7e-6
+    assert 4e-6 < c < 9e-6          # 8.2e-6 with the bolts at 21.8 mm (stem GEOMETRY_REV 3)
     j, need = fc.faceplate_joint(p, HandlebarParams(), fea_compliance=c)
     assert 70 < need["fatigue_peak_Nm"] < 80
     w = fc.calc(j)["torque_window_Nm"]
