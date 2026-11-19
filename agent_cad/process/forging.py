@@ -22,6 +22,7 @@ import math
 from dataclasses import dataclass, asdict
 import numpy as np
 import shapely
+import shapely.affinity
 from shapely.geometry import Polygon as SPolygon
 from build123d import (Vector, Plane, Face, Wire, Solid, Part, Pos, Box, Cone, Align,
                        extrude, section, mirror, scale)
@@ -241,7 +242,10 @@ def dies(p, blank, fp=ForgingParams()):
     The upper die sits at Y >= 0; the lower is its mirror (the part is symmetric)."""
     k = shrink_factor(p, fp)
     cavity = scale(blank, k)
-    outline, _, t, b, tg = flash_dims(cavity, fp)
+    # the land is the cold forging's flash grown by k like the cavity, so the hot forging
+    # (flash included) is exactly the die's opening, and the flash cools to t
+    outline, _, t, b, tg = flash_dims(blank, fp)
+    outline, t, b = shapely.affinity.scale(outline, k, k, origin=(0, 0)), k * t, k * b
     land = _clean(outline.buffer(b, quad_segs=8))                    # the section's tessellation
     gutter_out = _clean(outline.buffer(b + fp.gutter_w_mm, quad_segs=8))  # leaves sub-0.01 mm segments
     gutter = gutter_out.difference(land)          # the ring beyond the land: the land keeps its t/2
