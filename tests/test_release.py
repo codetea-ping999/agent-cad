@@ -114,3 +114,23 @@ def test_hole_groups_and_component_sheet():
     info["holes"][0] = ("冷却穴", 8.0, "X", 3)                     # the tool lacks a channel the design asks for
     r = check_sheet(tool.component_sheet(shape, info))
     assert not r["pass"] and any(c["check"] == "feature.holes.冷却穴" and not c["pass"] for c in r["checks"])
+
+
+def test_forging_drawings_use_the_modeled_hot_die_dimensions(monkeypatch):
+    from agent_cad.parts import stem
+    from agent_cad.process import forging as fg
+    from scripts import release
+
+    p, fp = stem.StemParams(), fg.ForgingParams(flash_t_mm=1.8)
+    blank = Box(100, 25, 65)
+    upper, lower = fg.dies(p, blank, fp)
+    ds = dict(blank=blank, upper=upper, lower=lower, forging=blank)
+    monkeypatch.setattr(release, "forging_case", lambda _: (p, fp, ds, {"pass": True}))
+    ctx = dict(revs={"AC-1001": "A"}, numbers={"forging_upper": "AC-5102", "forging_lower": "AC-5103"})
+    drawing = dict(number="AC-5101", title="鍛造型", case="sample", product="AC-1001")
+
+    for generate in (release.g_forging_assembly, release.g_forging_die("upper"), release.g_forging_die("lower")):
+        checks = check_sheet(generate(drawing, ctx)["sheet"])["checks"]
+        dimensions = [c for c in checks if c["check"].startswith("dim.")]
+        assert len(dimensions) == 3
+        assert all(c["pass"] for c in dimensions), dimensions

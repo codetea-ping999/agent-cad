@@ -125,20 +125,11 @@ def _component(it, ctx, shape, mat, block, holes, notes, en):
     return sh, ps
 
 
-def _forging_block(p, fp, ds):
-    """Die block size as fg.dies() makes it."""
-    k = fg.shrink_factor(p, fp)
-    cavity = scale(ds["blank"], k)
-    outline, _, t, b, tg = fg.flash_dims(cavity, fp)
-    x0, z0, x1, z1 = fg._clean(outline.buffer(b + fp.gutter_w_mm, quad_segs=8)).bounds
-    w = fp.die_wall_mm
-    return (x1 - x0 + 2 * w, cavity.bounding_box().max.Y + fp.die_base_mm, z1 - z0 + 2 * w), k, t
-
-
 def g_forging_die(which):
     def g(it, ctx):
         p, fp, ds, rep = forging_case(it["case"])
-        block, k, t = _forging_block(p, fp, ds)
+        layout = fg.die_layout(p, ds["blank"], fp)
+        block, k, t = layout["size"], layout["shrink_factor"], layout["flash_thickness"]
         sh, ps = _component(it, ctx, ds[which], SKD61, block, [],
                             [_product_note(it, ctx, f"キャビティは鍛造品を熱収縮分 {(k - 1) * 100:.2f} % 拡大。"),
                              f"見切り面は型合わせ面。バリ厚さ {t:.2f} (上下計)、バリ溜まりは外周。型温 {fp.die_temp_C:g} °C で使用。",
@@ -149,7 +140,7 @@ def g_forging_die(which):
 
 def g_forging_assembly(it, ctx):
     p, fp, ds, rep = forging_case(it["case"])
-    block, k, t = _forging_block(p, fp, ds)
+    block = fg.die_layout(p, ds["blank"], fp)["size"]
     up, lo, fo = ds["upper"], ds["lower"], ds["forging"]
     shape = Compound([up, lo, fo])
     n = ctx["numbers"]

@@ -237,27 +237,34 @@ def shrink_factor(p, fp=ForgingParams()):
     return (1 + m.cte_per_K * (FORGE_TEMP_C[p.material] - 20)) / (1 + 11.5e-6 * (fp.die_temp_C - 20))
 
 
-def dies(p, blank, fp=ForgingParams()):
-    """(upper die, lower die) blocks with the cavity, flash land and gutter.
-    The upper die sits at Y >= 0; the lower is its mirror (the part is symmetric)."""
+def die_layout(p, blank, fp=ForgingParams()):
+    """Return the hot cavity, land and gutter with the nominal block size."""
     k = shrink_factor(p, fp)
     cavity = scale(blank, k)
-    # the land is the cold forging's flash grown by k like the cavity, so the hot forging
-    # (flash included) is exactly the die's opening, and the flash cools to t
+    # Scale the cold outline and land with the cavity so the hot forging fits.
     outline, _, t, b, tg = flash_dims(blank, fp)
-    outline, t, b = shapely.affinity.scale(outline, k, k, origin=(0, 0)), k * t, k * b
-    land = _clean(outline.buffer(b, quad_segs=8))                    # the section's tessellation
-    gutter_out = _clean(outline.buffer(b + fp.gutter_w_mm, quad_segs=8))  # leaves sub-0.01 mm segments
-    gutter = gutter_out.difference(land)          # the ring beyond the land: the land keeps its t/2
+    outline = shapely.affinity.scale(outline, k, k, origin=(0, 0))
+    t, b = k * t, k * b
+    land = _clean(outline.buffer(b, quad_segs=8))
+    gutter_out = _clean(outline.buffer(b + fp.gutter_w_mm, quad_segs=8))
+    gutter = gutter_out.difference(land)
     x0, z0, x1, z1 = gutter_out.bounds
     w = fp.die_wall_mm
-    ytop = cavity.bounding_box().max.Y
-    hb = ytop + fp.die_base_mm
-    block = Pos((x0 + x1) / 2, hb / 2, (z0 + z1) / 2) * Box(x1 - x0 + 2 * w, hb, z1 - z0 + 2 * w)
-    upper = block - cavity
-    upper -= extrude(face_at(land, 0.0), t / 2, dir=(0, 1, 0))
-    for g in _polys(gutter):
-        upper -= extrude(face_at(g, 0.0), tg / 2, dir=(0, 1, 0))
+    hb = cavity.bounding_box().max.Y + fp.die_base_mm
+    size = (x1 - x0 + 2 * w, hb, z1 - z0 + 2 * w)
+    center = ((x0 + x1) / 2, hb / 2, (z0 + z1) / 2)
+    return dict(cavity=cavity, land=land, gutter=gutter, size=size, center=center,
+                shrink_factor=k, flash_thickness=t, gutter_thickness=tg)
+
+
+def dies(p, blank, fp=ForgingParams()):
+    """Upper die and its mirror, with the cavity, flash land and gutter."""
+    layout = die_layout(p, blank, fp)
+    block = Pos(*layout["center"]) * Box(*layout["size"])
+    upper = block - layout["cavity"]
+    upper -= extrude(face_at(layout["land"], 0.0), layout["flash_thickness"] / 2, dir=(0, 1, 0))
+    for g in _polys(layout["gutter"]):
+        upper -= extrude(face_at(g, 0.0), layout["gutter_thickness"] / 2, dir=(0, 1, 0))
     return upper, mirror(upper, Plane.XZ)
 
 
