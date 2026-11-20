@@ -15,6 +15,14 @@
    "date": "2026-10-27",
    "fingerprint": "410d2c528940e7d7",
    "rev": "A"
+  },
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "フェイスプレート締結位置 21.8 mm",
+   "date": "2026-11-20",
+   "fingerprint": "014ee89c7f1ad42d",
+   "rev": "B"
   }
  ],
  "AC-1002": [
@@ -25,6 +33,14 @@
    "date": "2026-10-23",
    "fingerprint": "f945cc51a9712096",
    "rev": "-"
+  },
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "フェイスプレート締結位置 21.8 mm",
+   "date": "2026-11-20",
+   "fingerprint": "4468947dbe9d0c0e",
+   "rev": "A"
   }
  ],
  "AC-1101": [
@@ -73,6 +89,14 @@
    "date": "2026-10-27",
    "fingerprint": "2cf1bf3e4b1d469f",
    "rev": "A"
+  },
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "製品図 AC-5101 改訂に追従（締結位置 21.8 mm）",
+   "date": "2026-11-20",
+   "fingerprint": "b747c245f01a3503",
+   "rev": "B"
   }
  ],
  "AC-5102": [
@@ -91,6 +115,14 @@
    "date": "2026-10-27",
    "fingerprint": "bd64add6f0ed0f04",
    "rev": "A"
+  },
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "製品図 AC-5102 改訂に追従（締結位置 21.8 mm）",
+   "date": "2026-11-20",
+   "fingerprint": "dbf112fcde4bd58e",
+   "rev": "B"
   }
  ],
  "AC-5103": [
@@ -109,6 +141,14 @@
    "date": "2026-10-27",
    "fingerprint": "5a1d783315016ff0",
    "rev": "A"
+  },
+  {
+   "approved_by": null,
+   "approved_on": null,
+   "change": "製品図 AC-5103 改訂に追従（締結位置 21.8 mm）",
+   "date": "2026-11-20",
+   "fingerprint": "84c6aeb8f01b0d88",
+   "rev": "B"
   }
  ],
  "AC-5201": [
