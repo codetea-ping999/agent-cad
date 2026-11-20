@@ -187,7 +187,7 @@ def _component(shape, info, size, k):
     sh.meta["drawing_kind"] = "tool_component"
     sh.roughness((x0 + 6, ytop + 4), 6.3)
     sh.text((x0 + 40, ytop + 5.5),
-            f"( キャビティ・コア面 Ra {info.get('cavity_ra', 0.4)} )", 3.2, 0, "left", "bottom")
+            f"( {info.get('surface', 'キャビティ・コア面')} Ra {info.get('cavity_ra', 0.4)} )", 3.2, 0, "left", "bottom")
     _block_dims(sh, shape, front, right, info["block"], info["up"])
     # section line through the middle on the parting-face view
     tb = top.bbox()
@@ -210,8 +210,8 @@ def _component(shape, info, size, k):
     sh.meta["hole_table"] = rows
     notes = [f"指示なき寸法許容差は JIS B 0405-{TOL_CLASS} による。",
              f"材料 {info['material']}、{info['finish']}。",
-             "キャビティ・コア形状および穴位置は3Dデータ (STEP AP242、同図番) による。",
-             "指示なきかどは C0.5、キャビティ稜線はシャープエッジ (面取りなし)。"] + info.get("notes", [])
+             info.get("shape_note", "キャビティ・コア形状および穴位置は3Dデータ (STEP AP242、同図番) による。"),
+             info.get("edge_note", "指示なきかどは C0.5、キャビティ稜線はシャープエッジ (面取りなし)。")] + info.get("notes", [])
     ybot = _notes(sh, notes, (16, 112))
     if rows:
         sh.text((16, ybot - 4), "穴表", 3.2, 0, "left", "bottom")
