@@ -69,6 +69,7 @@ class View:
     scale: float = 1.0
     section: tuple | None = None   # (plane origin, plane normal): keep the side the normal points to
     label: str = ""
+    smooth_deg: float | None = None   # hide facet edges (two planar faces < this angle apart), as on a true curved face
     vis: list = field(default_factory=list)
     cut_faces: list = field(default_factory=list)
 
@@ -107,7 +108,43 @@ class View:
             for e in Compound(c).edges():
                 pts = [np.array(self.origin) + self.scale * np.array([p.X, p.Y]) for p in _discretize(e)]
                 self.vis.append(np.array(pts))
+        if self.smooth_deg:
+            self._drop_facet_edges(shape, eye)
         return self
+
+    def _drop_facet_edges(self, shape, eye):
+        """Remove projected edges that lie on an edge between two planar facets less than
+        smooth_deg apart, both facing the viewer: a faceted cylinder or cone (a polygon
+        prism) then reads like the true surface. Silhouettes stay."""
+        adj = {}
+        for f in shape.faces():
+            if f.geom_type != GeomType.PLANE:
+                continue
+            n = f.normal_at(); n = np.array([n.X, n.Y, n.Z])
+            for e in f.edges():
+                adj.setdefault(e, []).append(n)
+        cos_lim = math.cos(math.radians(self.smooth_deg))
+        segs = []
+        for e, ns in adj.items():
+            if len(ns) != 2 or ns[0] @ ns[1] < cos_lim or min(n @ eye for n in ns) <= 1e-9:
+                continue
+            segs.append((self.to_sheet(e.position_at(0)), self.to_sheet(e.position_at(1))))
+        if not segs:
+            return
+        A = np.array([a for a, _ in segs]); B = np.array([b for _, b in segs])
+        AB = B - A; L2 = np.maximum((AB ** 2).sum(1), 1e-12)
+        tol = 1e-3 * max(self.scale, 1.0)
+
+        def on_facet_edge(q):
+            t = np.clip(((q - A) * AB).sum(1) / L2, 0, 1)
+            return (((A + t[:, None] * AB - q) ** 2).sum(1) < tol ** 2)
+
+        keep = []
+        for v in self.vis:
+            hit = on_facet_edge(v[0]) & on_facet_edge(v[-1]) & on_facet_edge((v[0] + v[-1]) / 2)
+            if not hit.any():
+                keep.append(v)
+        self.vis = keep
 
     def bbox(self):
         pts = np.vstack(self.vis)
@@ -448,7 +485,18 @@ class Sheet:
             self.text(p - u * 4 * s + lk * 3, label, 5, 0, "center", "center")
 
     # ---- sheet furniture
+    SIGNOFF = (("rev", "改訂", 18), ("status", "状態", 38), ("drawn", "作成", 38), ("checked", "検図", 38), ("approved", "承認", 38))
+    REV_COLS = (("rev", "記号", 14), ("date", "年月日", 24), ("change", "改訂内容", 100), ("approved", "承認", 32))
+    REV_ROWS = 2          # latest revisions shown on the sheet; the full history goes with the package
+
     def frame_and_title(self, title_rows, margin=10.0):
+        """Frame, centring marks and the title block (JIS Z 8311): the key/value rows, a
+        sign-off row (revision, status, drawn / checked / approved: name and date) and the
+        revision table above it. The sign-off and revision cells are left empty here and
+        filled by stamp_release(), so the content of the drawing (what the release
+        fingerprint covers) does not depend on its release state. A "作成" row from the
+        caller is dropped: the sign-off row carries it."""
+        rows = [(k, v) for k, v in title_rows if k != "作成"]
         W, H = self.size
         self.line([(margin, margin), (W - margin, margin), (W - margin, H - margin), (margin, H - margin), (margin, margin)], "frame")
         # centring marks (JIS Z 8311)
@@ -456,17 +504,62 @@ class Sheet:
                      ((5, H / 2), (margin, H / 2)), ((W - margin, H / 2), (W - 5, H / 2))):
             self.line([p, q], "frame")
         # title block: bottom right, 170 wide
-        x0, y0, w, rh = W - margin - 170, margin, 170, 7.0
-        n = len(title_rows)
+        x0, y0, w, rh = W - margin - 170, margin, 170, 6.5
+        n = len(rows)
         for i in range(n + 1):
-            self.line([(x0, y0 + i * rh), (x0 + w, y0 + i * rh)], "frame" if i in (0, n) else "thin")
+            self.line([(x0, y0 + i * rh), (x0 + w, y0 + i * rh)], "frame" if i == 0 else "thin")
         self.line([(x0, y0), (x0, y0 + n * rh)], "frame")
         self.line([(x0 + 40, y0), (x0 + 40, y0 + n * rh)], "thin")
-        for i, (k, v) in enumerate(reversed(title_rows)):
+        for i, (k, v) in enumerate(reversed(rows)):
             self.text((x0 + 2, y0 + i * rh + rh / 2), k, 3.0, 0, "left", "center")
             self.text((x0 + 42, y0 + i * rh + rh / 2), v, 3.5, 0, "left", "center")
-        self.meta["title_block"] = dict(title_rows)
-        return x0, y0 + n * rh
+        cells = {}
+        # sign-off row
+        ys, sh_ = y0 + n * rh, 11.0
+        self.line([(x0, ys + sh_), (x0 + w, ys + sh_)], "thin")
+        x = x0
+        for key, label, cw in self.SIGNOFF:
+            self.line([(x, ys), (x, ys + sh_)], "frame" if x == x0 else "thin")
+            self.text((x + 1.2, ys + sh_ - 1.0), label, 2.2, 0, "left", "top")
+            cells[key] = (x, ys, cw, sh_)
+            x += cw
+        # revision table: header on top, newest revision right under it
+        yr, rr = ys + sh_, 5.0
+        top = yr + (self.REV_ROWS + 1) * rr
+        for i in range(1, self.REV_ROWS + 2):
+            self.line([(x0, yr + i * rr), (x0 + w, yr + i * rr)], "frame" if i == self.REV_ROWS + 1 else "thin")
+        x = x0
+        for key, label, cw in self.REV_COLS:
+            self.line([(x, yr), (x, top)], "frame" if x == x0 else "thin")
+            self.text((x + cw / 2, top - rr / 2), label, 2.5, 0, "center", "center")
+            cells["rev_" + key] = [(x, yr + (self.REV_ROWS - 1 - j) * rr, cw, rr) for j in range(self.REV_ROWS)]
+            x += cw
+        self.line([(x0 + w, y0), (x0 + w, top)], "frame")
+        self.meta["title_block"] = dict(rows)
+        self.meta["release_cells"] = cells
+        return x0, top
+
+    def stamp_release(self, info):
+        """Fill the sign-off row and the revision table. `info`: rev, status,
+        drawn / checked / approved as (name, date) or None, history as
+        [(rev, date, change, approver)], newest first."""
+        cells = self.meta["release_cells"]
+        x, y, cw, h = cells["rev"]
+        self.text((x + cw / 2, y + h / 2 - 1.2), info["rev"], 5.0, 0, "center", "center")
+        x, y, cw, h = cells["status"]
+        self.text((x + cw / 2, y + h / 2 - 1.2), info["status"], 2.8, 0, "center", "center")
+        for key in ("drawn", "checked", "approved"):
+            x, y, cw, h = cells[key]
+            v = info.get(key)
+            if v:
+                self.text((x + 9, y + h - 1.0), v[0], 2.5, 0, "left", "top")
+                self.text((x + cw - 1.2, y + 1.0), v[1], 2.2, 0, "right", "bottom")
+        for j, row in enumerate(info.get("history", [])[:self.REV_ROWS]):
+            for (key, _, _), val in zip(self.REV_COLS, row):
+                x, y, cw, h = cells["rev_" + key][j]
+                self.text((x + 1.2, y + h / 2), val or "", 2.5, 0, "left", "center")
+        self.meta["release"] = {k: v for k, v in info.items()}
+        self.meta["title_block"]["改訂"] = info["rev"]
 
     def projection_symbol(self, pos, size=10.0):
         """Third-angle projection symbol (JIS B 0001 / ISO 5456-2)."""

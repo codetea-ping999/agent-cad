@@ -1,0 +1,19 @@
+{
+ "_note": "図番台帳。図番は固定で、形状・内容の変更は改訂記号で表す (agent_cad/release.py)。source は scripts/release.py の生成関数、case は部品パラメータのケース名。",
+ "items": [
+  {"number": "AC-1001", "title": "ステム 本体", "source": "stem_body", "case": "stem90_6061"},
+  {"number": "AC-1002", "title": "ステム フェイスプレート", "source": "stem_faceplate", "case": "stem90_6061"},
+  {"number": "AC-1101", "title": "ブラケット", "source": "bracket", "case": "bracket_std"},
+  {"number": "AC-1201", "title": "電装ハウジング", "source": "housing", "case": "housing_std"},
+  {"number": "AC-5101", "title": "鍛造型 組立", "source": "forging_assembly", "case": "stem90_6061", "product": "AC-1001"},
+  {"number": "AC-5102", "title": "鍛造型 上型", "source": "forging_upper", "case": "stem90_6061", "product": "AC-1001"},
+  {"number": "AC-5103", "title": "鍛造型 下型", "source": "forging_lower", "case": "stem90_6061", "product": "AC-1001"},
+  {"number": "AC-5201", "title": "ダイカスト型 組立", "source": "diecast_assembly", "case": "bracket_std", "product": "AC-1101"},
+  {"number": "AC-5202", "title": "ダイカスト型 可動型", "source": "diecast_moving", "case": "bracket_std", "product": "AC-1101"},
+  {"number": "AC-5203", "title": "ダイカスト型 固定型", "source": "diecast_cover", "case": "bracket_std", "product": "AC-1101"},
+  {"number": "AC-5301", "title": "射出成形型 組立", "source": "mould_assembly", "case": "housing_std", "product": "AC-1201"},
+  {"number": "AC-5302", "title": "射出成形型 固定側", "source": "mould_fixed", "case": "housing_std", "product": "AC-1201"},
+  {"number": "AC-5303", "title": "射出成形型 可動側", "source": "mould_moving", "case": "housing_std", "product": "AC-1201"},
+  {"number": "AC-5304", "title": "射出成形型 スライド", "source": "mould_slide", "case": "housing_std", "product": "AC-1201"}
+ ]
+}
