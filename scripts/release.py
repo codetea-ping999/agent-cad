@@ -126,13 +126,14 @@ def _component(it, ctx, shape, mat, block, holes, notes, en):
 
 
 def _forging_block(p, fp, ds):
-    """Die block size as fg.dies() makes it."""
+    """Die block size as fg.dies() makes it. Measured from the dies themselves: the block is
+    built from the blank's flash land (scaled by the shrink factor), and re-deriving it here
+    from the cavity gave a different land and a 0.06 mm mismatch with the drawn die."""
     k = fg.shrink_factor(p, fp)
-    cavity = scale(ds["blank"], k)
-    outline, _, t, b, tg = fg.flash_dims(cavity, fp)
-    x0, z0, x1, z1 = fg._clean(outline.buffer(b + fp.gutter_w_mm, quad_segs=8)).bounds
-    w = fp.die_wall_mm
-    return (x1 - x0 + 2 * w, cavity.bounding_box().max.Y + fp.die_base_mm, z1 - z0 + 2 * w), k, t
+    up, _ = fg.dies(p, ds["blank"], fp)
+    bb = up.bounding_box()
+    t = k * fg.flash_dims(ds["blank"], fp)[2]
+    return (bb.size.X, bb.size.Y, bb.size.Z), k, t
 
 
 def g_forging_die(which):
