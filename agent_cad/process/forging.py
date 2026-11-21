@@ -87,7 +87,12 @@ def face_at(poly, y=0.0, tol=0.0):
 def drafted_prism(poly, h, deg, y0=0.0):
     """Prism on `poly` at Y = y0, height h along +Y, side faces drafted inward by `deg`
     (the base stays, the top shrinks by h tan(deg))."""
-    pr = extrude(face_at(poly, y0), h, dir=(0, 1, 0))
+    return draft_sides(extrude(face_at(poly, y0), h, dir=(0, 1, 0)), deg, y0)
+
+
+def draft_sides(pr, deg, y0=0.0):
+    """Draft every side face of a prism standing on Y = y0 (planes and cylinders alike)
+    inward by `deg` going up; the base stays."""
     da = BRepOffsetAPI_DraftAngle(pr.solids()[0].wrapped)
     pln = gp_Pln(gp_Pnt(0, y0, 0), gp_Dir(0, 1, 0))
     for fc in pr.faces():

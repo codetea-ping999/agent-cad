@@ -13,6 +13,7 @@ jobs:
       - run: python -m scripts.make_stem
       - run: python -m scripts.make_forging
       - run: python -m scripts.make_diecast
+      - run: python -m scripts.make_molding
       - uses: actions/upload-artifact@v4
         if: always()
         with: {name: out, path: out/}
