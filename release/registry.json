@@ -14,6 +14,18 @@
   {"number": "AC-5301", "title": "射出成形型 組立", "source": "mould_assembly", "case": "housing_std", "product": "AC-1201"},
   {"number": "AC-5302", "title": "射出成形型 固定側", "source": "mould_fixed", "case": "housing_std", "product": "AC-1201"},
   {"number": "AC-5303", "title": "射出成形型 可動側", "source": "mould_moving", "case": "housing_std", "product": "AC-1201"},
-  {"number": "AC-5304", "title": "射出成形型 スライド", "source": "mould_slide", "case": "housing_std", "product": "AC-1201"}
+  {"number": "AC-5304", "title": "射出成形型 スライド", "source": "mould_slide", "case": "housing_std", "product": "AC-1201"},
+  {"number": "AC-1301", "title": "ハンドルバー", "source": "handlebar", "case": "drop420_7075"},
+  {"number": "AC-5401", "title": "曲げ型 組立 (B2 段取り)", "source": "bend_assembly", "case": "drop420_7075", "product": "AC-1301"},
+  {"number": "AC-5402", "title": "曲げ型", "source": "bend_die", "case": "drop420_7075", "product": "AC-1301"},
+  {"number": "AC-5403", "title": "クランプ型 (直線)", "source": "bend_clamp", "case": "drop420_7075", "product": "AC-1301"},
+  {"number": "AC-5404", "title": "クランプインサート (直線)", "source": "bend_insert", "case": "drop420_7075", "product": "AC-1301"},
+  {"number": "AC-5405", "title": "クランプ型 (B2 倣い)", "source": "bend_clamp_b2", "case": "drop420_7075", "product": "AC-1301"},
+  {"number": "AC-5406", "title": "クランプインサート (B2 倣い)", "source": "bend_insert_b2", "case": "drop420_7075", "product": "AC-1301"},
+  {"number": "AC-5407", "title": "プレッシャー型", "source": "bend_pressure_die", "case": "drop420_7075", "product": "AC-1301"},
+  {"number": "AC-5408", "title": "ワイパー型", "source": "bend_wiper", "case": "drop420_7075", "product": "AC-1301"},
+  {"number": "AC-5409", "title": "ボールマンドレル", "source": "bend_mandrel", "case": "drop420_7075", "product": "AC-1301"},
+  {"number": "AC-5411", "title": "スエージ型", "source": "swage_die", "case": "drop420_7075", "product": "AC-1301"},
+  {"number": "AC-5412", "title": "スエージ用マンドレル", "source": "swage_mandrel", "case": "drop420_7075", "product": "AC-1301"}
  ]
 }
