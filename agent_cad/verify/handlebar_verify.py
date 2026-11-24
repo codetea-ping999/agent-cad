@@ -150,7 +150,7 @@ def allowable(p, kind):
     return fatigue_strength(p) / SF_FATIGUE, f"fatigue {fatigue_strength(p):g} MPa @1e5 / {SF_FATIGUE}"
 
 
-def solid_fea(p, shape, cases=LOAD_CASES, h=SOLID_H):
+def solid_fea(p, shape, cases=LOAD_CASES, h=SOLID_H, curvature=12, solver="direct", keep_mesh=False):
     """Solid FEA of the right half (the clamp holds each half on its own, so in-phase and
     out-of-phase cases load a half the same way)."""
     from build123d import Box, Pos
@@ -170,7 +170,8 @@ def solid_fea(p, shape, cases=LOAD_CASES, h=SOLID_H):
         F = np.array(lc.force_N, float)
         M = np.cross(np.array(HOOD_OFFSET), F) if lc.where == "hoods" else np.zeros(3)
         loads[lc.name] = [bar_fea.BandLoad(tuple(q), tuple(t), p.grip_d / 2, 5.0, tuple(F), tuple(M))]
-    res, info = bar_fea.solve_cases(half, MATERIALS[p.material], fixed, loads, h)
+    res, info = bar_fea.solve_cases(half, MATERIALS[p.material], fixed, loads, h, curvature, solver)
+    mesh = info.pop("mesh")
     edge = STEM_CLAMP_W / 2 + 3.0              # leave out the clamp-edge singularity of the rigid fixture
     out = {}
     for name, r in res.items():
@@ -181,6 +182,8 @@ def solid_fea(p, shape, cases=LOAD_CASES, h=SOLID_H):
         r["vm_max_away_from_clamp_MPa"] = round(float(vm[k]), 1)
         r["at_away_mm"] = [round(float(x), 1) for x in c[:, k]]
         out[name] = r
+    if keep_mesh:
+        info["mesh"] = mesh
     return out, info
 
 

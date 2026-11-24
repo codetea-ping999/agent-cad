@@ -22,22 +22,20 @@ class BandLoad:
     M: tuple = (0.0, 0.0, 0.0)  # about `centre`
 
 
-def solve_cases(shape, material, fixed, cases, h=2.0):
+def solve_cases(shape, material, fixed, cases, h=2.0, curvature=12, solver="direct"):
     """cases: {name: [BandLoad]}. Returns {name: dict(vm_max, vm_p999, at, max_disp)} and the mesh size."""
     from skfem import Basis, FacetBasis, ElementTetP1, ElementTetP2, ElementVector, asm, LinearForm, Functional
     from skfem.models.elasticity import linear_elasticity, lame_parameters
     from skfem.helpers import sym_grad
-    from scipy.sparse.linalg import factorized
-    mesh = mesh_shape(shape, h)
+    from .static import linear_solver
+    mesh = mesh_shape(shape, h, curvature)
     e = ElementVector(ElementTetP2())
     ib = Basis(mesh, e)
     lam, mu = lame_parameters(material.E_MPa, material.nu)
     K = asm(linear_elasticity(lam, mu), ib)
     bf = mesh.boundary_facets()
     fc = mesh.p[:, mesh.facets[:, bf]].mean(axis=1)
-    D = ib.get_dofs(bf[fixed(fc)]).all()
-    I = ib.complement_dofs(D)
-    lu = factorized(K[I][:, I].tocsc())
+    lin = linear_solver(ib, K, ib.get_dofs(bf[fixed(fc)]).all(), solver)
     xq = ib.mapping.F(ib.X)
 
     def rhs(bl):
@@ -67,8 +65,7 @@ def solve_cases(shape, material, fixed, cases, h=2.0):
     out = {}
     for name, bands in cases.items():
         f = sum(rhs(b) for b in bands)
-        u = np.zeros(K.shape[0])
-        u[I] = lu(f[I])
+        u = lin(f)
         eps = sym_grad(ib.interpolate(u))
         tr = eps[0, 0] + eps[1, 1] + eps[2, 2]
         s = 2 * mu * eps + lam * np.einsum("ij,...->ij...", np.eye(3), tr)
@@ -80,4 +77,4 @@ def solve_cases(shape, material, fixed, cases, h=2.0):
         out[name] = dict(vm_max_MPa=round(float(vm_el.max()), 1), vm_p999_MPa=round(float(np.percentile(vm_el, 99.9)), 1),
                          at_mm=[round(float(c), 1) for c in xq[:, i, qn]], max_disp_mm=round(float(umag.max()), 3),
                          vm_el=vm_el, centroids=mesh.p[:, mesh.t].mean(axis=1))
-    return out, dict(tets=int(mesh.t.shape[1]), dofs=int(K.shape[0]), h=h)
+    return out, dict(tets=int(mesh.t.shape[1]), dofs=int(K.shape[0]), h=h, curvature=curvature, mesh=mesh)
