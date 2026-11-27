@@ -67,7 +67,9 @@ def to_dxf(sheet, path):
     msp = doc.modelspace()
     al = {("left", "bottom"): TextEntityAlignment.BOTTOM_LEFT, ("center", "bottom"): TextEntityAlignment.BOTTOM_CENTER,
           ("center", "center"): TextEntityAlignment.MIDDLE_CENTER, ("left", "center"): TextEntityAlignment.MIDDLE_LEFT,
-          ("left", "top"): TextEntityAlignment.TOP_LEFT, ("center", "top"): TextEntityAlignment.TOP_CENTER}
+          ("left", "top"): TextEntityAlignment.TOP_LEFT, ("center", "top"): TextEntityAlignment.TOP_CENTER,
+          ("right", "bottom"): TextEntityAlignment.BOTTOM_RIGHT, ("right", "center"): TextEntityAlignment.MIDDLE_RIGHT,
+          ("right", "top"): TextEntityAlignment.TOP_RIGHT}
     for it in sheet.items:
         k = it[0]
         if k == "line":

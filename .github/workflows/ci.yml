@@ -14,6 +14,27 @@ jobs:
       - run: python -m scripts.make_forging
       - run: python -m scripts.make_diecast
       - run: python -m scripts.make_molding
+      - name: Build and check drawing release
+        id: release
+        run: python -u -m scripts.release
+      - name: Report failed drawing checks
+        if: ${{ failure() && steps.release.outcome == 'failure' }}
+        run: |
+          python - <<'PYTHON'
+          import json
+          from pathlib import Path
+
+          manifest = Path("out/release/manifest.json")
+          if not manifest.is_file():
+              print("::error title=Drawing release::The release command stopped before writing its manifest.")
+          else:
+              for drawing in json.loads(manifest.read_text(encoding="utf-8"))["drawings"]:
+                  failed = [name for name, passed in drawing["gates"].items() if not passed]
+                  if failed:
+                      message = f"{drawing['number']}: {', '.join(failed)}"
+                      message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                      print(f"::error title=Drawing release::{message}")
+          PYTHON
       - uses: actions/upload-artifact@v4
         if: always()
         with: {name: out, path: out/}

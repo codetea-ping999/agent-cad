@@ -244,7 +244,7 @@ def _body_sheet(p, body, dwg_no, size, k):
     # the bar bore: the largest Y hole whose axis passes the bar axis (any size; pinch holes lie elsewhere)
     bar_bore = max(find_cyl(body, (0, 1, 0), inner=True, near=(B.X, 0, B.Z)), key=lambda c: c.r, default=None)
     if None in (st_bore, st_out, bar_bore):
-        return _unrecognised(p, size, "STEM_BODY", "ステム 本体 (STEM BODY)", f"{dwg_no or doc_no(p)}-01",
+        return _unrecognised(p, size, "STEM_BODY", "ステム 本体 (STEM BODY)", dwg_no or f"{doc_no(p)}-01",
                              dict(steerer_bore=st_bore is not None, steerer_clamp=st_out is not None,
                                   bar_bore=bar_bore is not None))
     Bm = bar_bore.loc - (bar_bore.loc @ np.array([0, 1, 0])) * np.array([0, 1, 0])
@@ -316,7 +316,7 @@ def _body_sheet(p, body, dwg_no, size, k):
         return None
     # sheet furniture first so annotations can avoid it
     mass = body.volume / 1000 * rho
-    _title(sh, p, "ステム 本体 (STEM BODY)", f"{dwg_no or doc_no(p)}-01", mass, scale=_scale_text(k))
+    _title(sh, p, "ステム 本体 (STEM BODY)", dwg_no or f"{doc_no(p)}-01", mass, scale=_scale_text(k))
     _notes(sh, _common_notes(sh, p, [f"※ φ{_fmt(2 * bar_bore.r)} はフェイスプレートと組み付けた状態で仕上げる (共加工)。",
                                  "ピンチボルト締結トルク 5〜6 N·m、フェイスプレート 4〜5 N·m (参考)。",
                                  "図示なき外形形状は3Dモデル (STEP AP242、同図番) による。"]), (16, 106))
@@ -717,7 +717,7 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     bore = max(find_cyl(fp, (0, 1, 0), inner=True, near=tuple(Bm)), key=lambda c: c.r, default=None)
     if bore is None:
         return _unrecognised(p, size, "STEM_FACEPLATE", "ステム フェイスプレート (FACEPLATE)",
-                             f"{dwg_no or doc_no(p)}-02", dict(bar_bore=False))
+                             dwg_no or f"{doc_no(p)}-02", dict(bar_bore=False))
     # every view and dimension is laid out about the nominal bar axis Bm
     D.rec("bar_bore_axis_offset", math.hypot((bore.loc - Bm) @ dv, (bore.loc - Bm) @ nv), 0.0, "")
 
@@ -873,7 +873,7 @@ def _faceplate_sheet(p, fp, scale, size, dwg_no):
     D.rec("bar_bore_overcut_mm3", _overcut(fp, (Bm[0], y0 + 0.5, Bm[2]), (Bm[0], y1 - 0.5, Bm[2]), bore.r,
                                            keep=_halfspace(Bm + dv * (t_back + 0.01), dv), allowed=allowed), 0.0, "")
     mass = fp.volume / 1000 * stem.density(p)
-    _title(sh, p, "ステム フェイスプレート (FACEPLATE)", f"{dwg_no or doc_no(p)}-02", mass, scale=_scale_text(scale))
+    _title(sh, p, "ステム フェイスプレート (FACEPLATE)", dwg_no or f"{doc_no(p)}-02", mass, scale=_scale_text(scale))
     _notes(sh, _common_notes(sh, p, [f"※ φ{_fmt(2 * bore.r)} は本体と組み付けた状態で仕上げる (共加工)。",
                                  f"本体との合わせ面のすき間 {_fmt(2 * t_back)} (締結前、参考)。",
                                  "図示なき外形形状は3Dモデル (STEP AP242、同図番) による。"]), (16, 106))
