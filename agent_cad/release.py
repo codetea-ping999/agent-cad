@@ -46,6 +46,20 @@ def shape_props(shape):
                 bbox=[_r(v, 2) for v in (bb.min.X, bb.min.Y, bb.min.Z, bb.max.X, bb.max.Y, bb.max.Z)])
 
 
+def geometry_signature(shape):
+    """Hash of the B-rep's faces: type, area and centre of each one, sorted. The fingerprint
+    keeps only volume, area and extent, so moving a hole inside a block leaves it unchanged;
+    this does not. Kept apart from the fingerprint so that revisions approved before it
+    existed stay valid: it is compared only where the history recorded it."""
+    faces = []
+    for f in shape.faces():
+        c = f.center()
+        faces.append((str(getattr(f.geom_type, "name", f.geom_type)), _r(f.area, 2),
+                      _r(c.X, 2), _r(c.Y, 2), _r(c.Z, 2)))
+    faces.sort()
+    return hashlib.sha256(json.dumps(faces).encode()).hexdigest()[:16]
+
+
 def fingerprint(sheet, shape):
     m = sheet.meta
     tb = {k: v for k, v in m.get("title_block", {}).items() if k not in ("図番", "改訂")}
@@ -76,7 +90,15 @@ class History:
             json.dump(self.data, f, ensure_ascii=False, indent=1, sort_keys=True)
             f.write("\n")
 
-    def state(self, number, fp, today):
+    @staticmethod
+    def _same(entry, fp, geom):
+        """Same content: the fingerprint matches and, where the history recorded the
+        geometry signature, that matches too."""
+        if entry["fingerprint"] != fp:
+            return False
+        return not (geom and entry.get("geometry") and entry["geometry"] != geom)
+
+    def state(self, number, fp, today, geom=None):
         """Revision and release state of `number` for a drawing with fingerprint fp.
         Returns dict(rev, approved, entry, pending): `pending` is the history entry this
         build would write (a new first issue, or a refreshed draft), None if unchanged.
@@ -85,15 +107,19 @@ class History:
         es = self.entries(number)
         if not es:
             e = dict(rev=FIRST_REV, date=today, fingerprint=fp, change="初版", approved_by=None, approved_on=None)
+            if geom:
+                e["geometry"] = geom
             return dict(rev=FIRST_REV, approved=False, entry=e, pending=e, error=None)
         last = es[-1]
-        if last["fingerprint"] == fp:
+        if self._same(last, fp, geom):
             return dict(rev=last["rev"], approved=bool(last.get("approved_by")), entry=last, pending=None, error=None)
         if last.get("approved_by"):
             return dict(rev=last["rev"], approved=False, entry=last, pending=None,
                         error=f"出図済みの改訂 {last['rev']} から内容が変わった: "
                               f"`python -m scripts.release revise {number} \"<改訂内容>\"` で改訂を起こすこと")
         e = dict(last, fingerprint=fp, date=today)
+        if geom:
+            e["geometry"] = geom
         return dict(rev=last["rev"], approved=False, entry=e, pending=e, error=None)
 
     def apply(self, number, entry):
@@ -103,22 +129,27 @@ class History:
         else:
             es.append(entry)
 
-    def revise(self, number, change, fp, today):
+    def revise(self, number, change, fp, today, geom=None):
         es = self.entries(number)
         if not es:
             raise ValueError(f"{number}: no first issue yet")
         if not es[-1].get("approved_by"):
             raise ValueError(f"{number}: revision {es[-1]['rev']} is not approved yet; change it in place")
-        self.data[number].append(dict(rev=next_rev(es[-1]["rev"]), date=today, fingerprint=fp, change=change,
-                                      approved_by=None, approved_on=None))
+        e = dict(rev=next_rev(es[-1]["rev"]), date=today, fingerprint=fp, change=change,
+                 approved_by=None, approved_on=None)
+        if geom:
+            e["geometry"] = geom
+        self.data[number].append(e)
 
-    def approve(self, number, fp, by, today):
+    def approve(self, number, fp, by, today, geom=None):
         es = self.entries(number)
         if not es:
             raise ValueError(f"{number}: not in the history (run the release build with --write-history)")
         last = es[-1]
-        if last["fingerprint"] != fp:
+        if not self._same(last, fp, geom):
             raise ValueError(f"{number}: the checked drawing differs from revision {last['rev']} in the history")
+        if geom and not last.get("geometry"):
+            last["geometry"] = geom        # recorded with the approval, so later changes are caught
         last["approved_by"], last["approved_on"] = by, today
 
 

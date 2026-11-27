@@ -14,7 +14,7 @@ process checks, revision state). Plus the drawing list (PDF, CSV), the change hi
 a manifest with SHA-256 of every file. `approve` and `revise` read the manifest of the
 last build, so they record the drawing that was actually checked.
 """
-import sys, os, json, csv, argparse
+import sys, os, json, csv, argparse, copy
 from functools import lru_cache
 from build123d import Compound, scale
 from agent_cad import release as rl, pmi
@@ -181,7 +181,8 @@ def g_diecast_die(which):
 def g_diecast_assembly(it, ctx):
     p, dp, ds, rep = diecast_case(it["case"])
     lx, hb, lz = ds["block_mm"]
-    mv, cv, pins, shot = ds["moving"], ds["cover"], ds["pins"], ds["shot"]
+    mv, cv, pins = ds["moving"], ds["cover"], ds["pins"]
+    shot = scale(ds["shot"], dc.shrink_factor(dp))     # the cavity is cut for the hot shot: seat it at that size
     shape = Compound([mv, cv, *pins, shot])
     n = ctx["numbers"]
     bom = [("可動型", n["diecast_moving"], "SKD61", 1, ""), ("固定型", n["diecast_cover"], "SKD61", 1, ""),
@@ -225,6 +226,15 @@ def g_mould_part(which):
     return g
 
 
+SUJ2 = ("SUJ2", 7.83)      # JIS G 4805 high-carbon chromium bearing steel (angle pin, per the BOM)
+
+
+def _BOM_STEEL(part, specs):
+    """Material of a standard part as the mould BOM states it: SUJ2 for the angle pin,
+    SKD61 for the core pins, sleeves and ejector pins."""
+    return SUJ2 if part is specs["angle_pin"] else fg.DIE_STEEL
+
+
 def g_mould_assembly(it, ctx):
     p, mp, ms, rep = mould_case(it["case"])
     lx, h, lz = ms["block_mm"]
@@ -250,8 +260,8 @@ def g_mould_assembly(it, ctx):
     s = make_molding.specs(p, ms)
     parts = [PartSpec(f"{n['mould_fixed']}_MOULD_FIXED", ms["fixed"], STEEL_RGB, *st),
              PartSpec(f"{n['mould_moving']}_MOULD_MOVING", ms["moving"], STEEL_RGB, *st),
-             PartSpec(f"{n['mould_slide']}_MOULD_SLIDE", ms["slide"], SLIDE_RGB, *st)] + \
-            [PartSpec(x.name.replace(make_molding.doc_no(p), it["number"]), x.shape, x.color, x.material, x.density_g_cm3)
+             PartSpec(f"{n['mould_slide']}_MOULD_SLIDE", ms["slide"], SLIDE_RGB, *fg.DIE_STEEL)] + \
+            [PartSpec(x.name.replace(make_molding.doc_no(p), it["number"]), x.shape, x.color, *_BOM_STEEL(x, s))
              for x in [s["angle_pin"], *s["core_pins"], *s["sleeves"], *s["pins"]]] + \
             [PartSpec(f"{it['product']}_SHOT", shot_k, make_molding.PART_RGB, p.material, housing.density(p))]
     return dict(sheet=sh, parts=parts, assembly=f"{it['number']}_MOULD", shape=shape, design=_design(rep), kind="型組立")
@@ -288,7 +298,8 @@ def build(only=None, write_history=False, out=OUT):
         sh = g["sheet"]
         dchk = check_sheet(sh)
         fp = rl.fingerprint(sh, g["shape"])
-        st = hist.state(it["number"], fp, today)
+        geom = rl.geometry_signature(g["shape"])
+        st = hist.state(it["number"], fp, today, geom)
         ctx["revs"][it["number"]] = st["rev"]
         if only and it["number"] not in only:
             continue                       # built only for its revision (cited by a tool drawing)
@@ -304,8 +315,14 @@ def build(only=None, write_history=False, out=OUT):
         gates = {"drawing": dchk["pass"], "step_exchange": xchk["pass"], "pmi": pmichk is None or pmichk["pass"],
                  "design": g["design"]["pass_"], "revision": st["error"] is None}
         ok = all(gates.values())
+        # stamping must not disturb the layout: try it on a copy first, and if the sign-off
+        # would break the layout, stamp the real sheet as failed rather than as checked or released
+        trial = copy.deepcopy(sh)
+        rl.stamp(trial, it["number"], st, hist.entries(it["number"]), ok, today)
+        if not check_sheet(trial)["pass"]:
+            gates["drawing"] = False
+            ok = False
         status = rl.stamp(sh, it["number"], st, hist.entries(it["number"]), ok, today)
-        # stamping must not disturb the layout
         post = check_sheet(sh)
         gates["drawing"] = post["pass"]
         ok = all(gates.values())
@@ -313,7 +330,7 @@ def build(only=None, write_history=False, out=OUT):
         to_dxf(sh, os.path.join(out, stem_ + ".dxf"))
         if write_history and st["pending"] is not None:
             hist.apply(it["number"], st["pending"])
-        rep = dict(number=it["number"], title=it["title"], kind=g["kind"], rev=st["rev"], status=status, fingerprint=fp,
+        rep = dict(number=it["number"], title=it["title"], kind=g["kind"], rev=st["rev"], status=status, fingerprint=fp, geometry=geom,
                    product=it.get("product"), product_rev=ctx["revs"].get(it.get("product")), sheet=f"{'A3' if sh.size == A3 else 'A2'}",
                    scale=sh.meta["title_block"]["尺度"], gates=gates, pass_=ok, revision_error=st["error"],
                    design_failed=g["design"]["failed"], drawing_failed=[c["check"] for c in post["checks"] if not c["pass"]],
@@ -391,7 +408,7 @@ def approve(numbers, by, out=OUT):
         d = man[n]
         if not d["pass_"]:
             sys.exit(f"{n}: the release gate failed ({d['gates']}); not approved")
-        hist.approve(n, d["fingerprint"], by, rl.today())
+        hist.approve(n, d["fingerprint"], by, rl.today(), d.get("geometry"))
         print(f"{n} rev {d['rev']} approved by {by}")
     hist.save()
 
@@ -399,7 +416,7 @@ def approve(numbers, by, out=OUT):
 def revise(number, change, out=OUT):
     man = _manifest(out)
     hist = rl.History(HISTORY)
-    hist.revise(number, change, man[number]["fingerprint"], rl.today())
+    hist.revise(number, change, man[number]["fingerprint"], rl.today(), man[number].get("geometry"))
     hist.save()
     print(f"{number}: revision {hist.entries(number)[-1]['rev']} started ({change})")
 

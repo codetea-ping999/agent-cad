@@ -42,6 +42,42 @@ def test_history_first_issue_draft_approval_and_revision(tmp_path):
     assert rl.History(str(tmp_path / "h.json")).entries("AC-1")[-1]["rev"] == "A"
 
 
+def test_moving_a_hole_changes_the_geometry_signature_but_not_the_fingerprint(tmp_path):
+    block = Box(20, 20, 10)
+    a = block - Pos(4, 0, 0) * Cylinder(2, 10)
+    b = block - Pos(-4, 0, 0) * Cylinder(2, 10)
+    sh = _sheet()
+    assert rl.fingerprint(sh, a) == rl.fingerprint(sh, b)       # volume, area and extent do not see it
+    ga, gb = rl.geometry_signature(a), rl.geometry_signature(b)
+    assert ga != gb and rl.geometry_signature(a) == ga
+    fp = rl.fingerprint(sh, a)
+    h = rl.History(str(tmp_path / "h.json"))
+    h.apply("AC-1", h.state("AC-1", fp, "2026-10-23", ga)["pending"])
+    h.approve("AC-1", fp, "Reviewer", "2026-10-24", ga)
+    assert h.entries("AC-1")[-1]["geometry"] == ga
+    assert h.state("AC-1", fp, "2026-10-25", ga)["approved"]
+    st = h.state("AC-1", fp, "2026-10-25", gb)                 # the hole moved: not the approved drawing
+    assert st["error"] and not st["approved"]
+    with pytest.raises(ValueError):
+        h.approve("AC-1", fp, "Reviewer", "2026-10-26", gb)
+
+
+def test_a_revision_approved_before_the_geometry_signature_stays_valid(tmp_path):
+    h = rl.History(str(tmp_path / "h.json"))
+    h.data["AC-1"] = [dict(rev="-", date="2026-10-23", fingerprint=FP1, change="初版",
+                           approved_by="Reviewer", approved_on="2026-10-24")]
+    st = h.state("AC-1", FP1, "2026-10-25", "g" * 16)           # no signature recorded: fingerprint decides
+    assert st["approved"] and st["error"] is None
+
+
+def test_pmi_requests_leave_out_verification_only_records():
+    sh = _sheet()
+    sh.meta["dims"].append(dict(name="bar_bore_clear", measured=0.0, intent=0.0, text="", tol=None))
+    sh.meta["dims"].append(dict(name="window_material_mm3", measured=0.0, intent=0.0, text="", tol=None))
+    reqs = pmi.from_sheet(sh)
+    assert [r["name"] for r in reqs] == ["len"]
+
+
 def _sheet(text="10"):
     sh = Sheet(A3)
     sh.frame_and_title([("図名", "T"), ("図番", "AC-1"), ("材料", "S45C"), ("質量 (計算)", "1 g"), ("尺度", "1:1"),

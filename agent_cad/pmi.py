@@ -46,6 +46,8 @@ def from_sheet(sheet):
     for d in sheet.meta.get("dims", []):
         base = d["name"].split("#")[0]
         t = d["text"]
+        if not t:                            # verification-only record (clearances, volumes): not on the drawing
+            continue
         kind = "diameter" if "φ" in t else "radius" if re.match(r"(\d+×)?R", t) else "linear"
         v = d["measured"]
         if d.get("tol"):
